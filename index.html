@@ -1805,8 +1805,18 @@ document.getElementById("btnPasteTrip").addEventListener("click", async () => {
     text = window.prompt("Paste a Maps link, address or lat,lon") || "";
   }
   const t = parseTripInput(text);
-  if (t && t.dest) showTripSheet(t, false);
-  else logMsg("Clipboard doesn't contain a Maps link, address or coordinates.");
+  if (t && t.dest) {
+    showTripSheet(t, false);
+    return;
+  }
+  const shortLink = /maps\.apple\/p\/|maps\.app\.goo\.gl|goo\.gl\/maps/i.test(text);
+  const msg = !text.trim()
+    ? "The clipboard is empty (or the paste wasn't allowed). Copy a place or link in Maps, then tap Paste trip again."
+    : shortLink
+      ? "That's a short Maps link, which a web page can't open on its own. Use the \"Send to HUD\" shortcut (it expands the link), or copy the place's address instead and paste that."
+      : `Couldn't find a place in what was pasted:\n\n${text.slice(0, 200)}`;
+  logMsg(msg.replace(/\n+/g, " "));
+  window.alert(msg);
 });
 
 // ============================================================================
