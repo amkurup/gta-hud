@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Set up "Send to HUD" (iPhone)</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #0b0d12; color: #eef0f4; padding: 18px; line-height: 1.45; max-width: 640px; margin: auto; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 17px; color: #ffb800; margin-top: 26px; }
+  ol { padding-left: 22px; }
+  li { margin: 8px 0; }
+  b { color: #fff; }
+  .act { display: inline-block; background: #232938; border: 1px solid #384157; border-radius: 6px; padding: 1px 7px; font-weight: 600; }
+  .box { background: #141821; border: 1px solid #262c3a; border-radius: 10px; padding: 12px; margin: 10px 0; }
+  code { font: 12px ui-monospace, Menlo, monospace; word-break: break-all; color: #9ecbff; }
+  button { background: #ffb800; color: #000; font-weight: 700; font-size: 17px; border: 0; border-radius: 10px; padding: 12px 18px; width: 100%; margin-top: 10px; }
+  .ok { color: #00e676; font-weight: 600; min-height: 1.2em; }
+  .note { color: #949ba8; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>Set up "Send to HUD" on iPhone</h1>
+<p class="note">One-time setup (about 3 minutes). Afterwards: in Apple or Google Maps tap <b>Share → Send to HUD</b>, Bluefy opens with the destination, tap <b>Start</b>.</p>
+
+<h2>Before you start</h2>
+<ol>
+  <li>Install <b>Bluefy – Web BLE Browser</b> from the App Store and open this companion once in it: <code>https://amkurup.github.io/gta-hud/</code></li>
+</ol>
+
+<h2>1. Create the shortcut</h2>
+<ol>
+  <li>Open the <b>Shortcuts</b> app → tap <b>+</b> (top right).</li>
+  <li>Tap the name at the top → <b>Rename</b> → type <b>Send to HUD</b>.</li>
+  <li>Tap <b>ⓘ</b> at the bottom → turn on <b>Show in Share Sheet</b> → <b>Done</b>.</li>
+</ol>
+
+<h2>2. Add 6 actions, in this order</h2>
+<p class="note">Use the <b>Search Actions</b> bar at the bottom. Each action automatically uses the result of the one above it.</p>
+<ol>
+  <li><span class="act">Get URLs from Input</span></li>
+  <li><span class="act">Expand URL</span></li>
+  <li><span class="act">URL Encode</span></li>
+  <li><span class="act">URL Encode</span> (yes, a second one)</li>
+  <li><span class="act">Text</span> — tap inside its text box, then:
+    <div class="box">
+      a) Copy this text with the button below and <b>paste</b> it into the box:<br />
+      <code id="prefix">bluefy://open?url=https%3A%2F%2Famkurup.github.io%2Fgta-hud%2F%23go%3Fshare%3D</code>
+      <button id="copy">Copy text</button>
+      <div class="ok" id="copied"></div>
+      b) With the cursor at the very end of that text, tap <b>URL Encoded Text</b> in the bar just above the keyboard (it inserts the result of action 4).
+    </div>
+  </li>
+  <li><span class="act">Open URLs</span></li>
+</ol>
+<p>Tap <b>Done</b> (top right). That's it.</p>
+
+<h2>3. Use it</h2>
+<ol>
+  <li>In <b>Apple Maps</b> or <b>Google Maps</b>, open a place or directions → <b>Share</b> → <b>Send to HUD</b> (scroll the list or tap <b>Edit Actions</b> if you don't see it).</li>
+  <li>The first time, allow the shortcut to open Bluefy.</li>
+  <li>Bluefy opens with <b>"Navigate to …"</b> at the bottom → tap <b>Start</b> (pick <b>GTA-HUD</b> if Bluetooth asks).</li>
+</ol>
+<p class="note">AirDropped Maps links open in Apple Maps first; share them from there the same way.</p>
+
+<script>
+document.getElementById("copy").addEventListener("click", async () => {
+  const text = document.getElementById("prefix").textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const r = document.createRange(); r.selectNodeContents(document.getElementById("prefix"));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); document.execCommand("copy");
+  }
+  document.getElementById("copied").textContent = "Copied — now paste it into the Text action.";
+});
+</script>
+</body>
+</html>
