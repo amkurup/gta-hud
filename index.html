@@ -34,7 +34,7 @@
   .app { width: 100%; max-width: 480px; min-height: 100vh; display: flex; flex-direction: column; }
 
   /* ---------- top: radar ---------- */
-  .top { padding: calc(env(safe-area-inset-top) + 14px) 18px 30px; color: #fff; }
+  .top { --rw: min(76vw, 300px); padding: calc(env(safe-area-inset-top) + 14px) 18px 30px; color: #fff; }
   .topbar { display: flex; justify-content: space-between; align-items: center; }
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 17px; letter-spacing: 0.01em; }
   .brand svg { width: 26px; height: 26px; }
@@ -60,9 +60,9 @@
   .turn-eta b { display: block; font-size: 20px; color: var(--gold); }
 
   .radar-wrap { position: relative; display: flex; justify-content: center; margin-top: 18px; }
-  #radar { width: min(76vw, 300px); aspect-ratio: 1; display: block; }
+  #radar { width: var(--rw); aspect-ratio: 1; display: block; transition: width 0.45s ease; }
   .speed-chip {
-    position: absolute; left: calc(50% - min(38vw, 150px) - 6px); bottom: -4px;
+    position: absolute; left: calc(50% - var(--rw) / 2 - 6px); bottom: -4px; transition: left 0.45s ease;
     width: 70px; height: 70px; border-radius: 50%;
     background: #141821; border: 3px solid rgba(255, 255, 255, 0.12);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -72,12 +72,27 @@
   .speed-chip span { font-size: 10px; color: #9aa0ab; font-weight: 600; letter-spacing: 0.06em; }
   .speed-chip.over { border-color: var(--bad); }
   .limit-chip {
-    position: absolute; left: calc(50% - min(38vw, 150px) + 52px); bottom: 44px;
+    position: absolute; left: calc(50% - var(--rw) / 2 + 52px); bottom: 44px; transition: left 0.45s ease;
     width: 34px; height: 34px; border-radius: 50%; background: #fff; color: #000;
     border: 3px solid var(--bad); font-size: 13px; font-weight: 800;
     display: flex; align-items: center; justify-content: center;
   }
   .limit-chip[hidden] { display: none; }
+
+  /* GTA V-style health/armor bars under the minimap: trip progress (green), next-turn approach (blue) */
+  .gta-bars { display: none; gap: 6px; width: var(--rw); margin: 14px auto 0; transition: width 0.45s ease; }
+  .gta-bar { flex: 1; height: 12px; background: rgba(0, 0, 0, 0.55); border: 2px solid #000; border-radius: 2px; overflow: hidden; }
+  .gta-bar > i { display: block; height: 100%; width: 0; background: #57a64d; transition: width 0.6s; }
+  .gta-bar.armor > i { background: #4a8fd8; }
+
+  /* Navigation: the radar is front and centre, the sheet shrinks to a compact dark bar */
+  .app.nav-mode .top { --rw: min(calc(100vw - 24px), 456px); flex: 1; display: flex; flex-direction: column; padding-inline: 12px; padding-bottom: 22px; }
+  .app.nav-mode .radar-wrap { margin-top: auto; padding-top: 18px; }
+  .app.nav-mode .gta-bars { display: flex; margin-bottom: auto; }
+  .app.nav-mode .sheet { flex: 0 0 auto; padding-top: 8px; }
+  .app.nav-mode .sheet h1 { font-size: 24px; margin-bottom: 10px; }
+  .app.nav-mode .cta-row { margin-top: 10px; }
+  .app.nav-mode .links { display: none; }
 
   /* ---------- bottom sheet ---------- */
   .sheet {
@@ -102,6 +117,15 @@
   .field .ico svg { width: 22px; height: 22px; }
   .via { font-size: 13px; color: var(--muted); margin: -4px 8px 8px; }
   .sheet.is-trip .field, .sheet.is-trip .via { display: none; }
+  /* During a trip the sheet goes dark so the screen isn't a bright white panel while driving */
+  .sheet { transition: background-color 0.4s, color 0.4s; }
+  .sheet.is-trip { background: #14161b; color: #f3f4f6; box-shadow: 0 -12px 34px rgba(0, 0, 0, 0.6); }
+  .sheet.is-trip .grabber { background: #2a2e36; }
+  .sheet.is-trip .kicker, .sheet.is-trip .hint { color: #7d828c; }
+  .sheet.is-trip .cta.dark { background: #24272e; color: #f3f4f6; }
+  .sheet.is-trip .round { background: #24272e; }
+  .sheet.is-trip .round .dot { border-color: #24272e; }
+  .sheet.is-trip .links a, .sheet.is-trip details.dev > summary { color: #555a63; }
   .via:empty { display: none; }
   .section-label { font-weight: 700; font-size: 15px; margin: 16px 6px 10px; }
   .section-label[hidden], .chips[hidden] { display: none; }
@@ -177,6 +201,10 @@
       <canvas id="radar"></canvas>
       <div class="speed-chip" id="speedChip"><b id="speedVal">0</b><span>MPH</span></div>
       <div class="limit-chip" id="limitChip" hidden></div>
+    </div>
+    <div class="gta-bars">
+      <div class="gta-bar" title="Trip remaining"><i id="barTrip"></i></div>
+      <div class="gta-bar armor" title="Distance to next turn"><i id="barTurn"></i></div>
     </div>
   </section>
 
@@ -260,6 +288,8 @@ const SERVICE_UUID        = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const CHAR_TELEMETRY_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 const CHAR_GEOMETRY_UUID  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 const PKT_TELEMETRY = 0x01, PKT_STREET_NAME = 0x02, PKT_ROUTE_POLYLINE = 0x10, PKT_ROAD_TILE = 0x20;
+// Area polygons ride in the road tiles as extra "tiers" (firmware AreaTier), drawn in this order
+const AREA_TIER_BUILDING = 16, AREA_TIER_PARK = 17, AREA_TIER_WATER = 18;
 const TILE_LON_E7 = 50000, TILE_LAT_E7 = 45000;
 const M_PER_DEG_LAT = 111132.92;
 const mPerDegLonAt = (latDeg) => 111412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -295,9 +325,11 @@ const state = {
   nextWpIdx: 0,
   closestRouteIdx: 0,
   gpsOrigin: false, // origin re-anchored to the first GPS fix when there's no route
+  areas: { blocks: [], parks: [], water: [] }, // app radar (and, clipped per tile, the HUD map detail)
   routePts: [],
   ways: [],          // { tier, pts: [{x,y}] } in session meters (for the simulator)
   tileRuns: new Map(), // "tx,ty" -> [{ tier, ll: [[lat,lon],...] }] (for streaming to the HUD)
+  tileAreas: new Map(), // "tx,ty" -> [{ tier: 16|17|18, ll: [[lat,lon],...] }] clipped to the tile
   hasRealRoute: false
 };
 
@@ -336,6 +368,7 @@ function buildDemoGrid() {
     tier: w.tier,
     ll: w.pts.map((p) => [state.originLat + p.y / M_PER_DEG_LAT, state.originLon + p.x / mLon])
   })));
+  state.tileAreas = new Map(); // synthetic grid: no real buildings to line up with
 }
 
 function loadDemoRoute() {
@@ -1008,12 +1041,8 @@ function startGpsTracking() {
       const { latitude, longitude, speed, heading } = pos.coords;
       currentGpsCoords = { lat: latitude, lon: longitude, speedMps: speed, heading };
       if (!state.hasRealRoute && !state.gpsOrigin) { // no route yet: center the map on the vehicle
-        state.originLat = latitude;
-        state.originLon = longitude;
+        rebaseMap(latitude, longitude);
         state.gpsOrigin = true;
-        state.ways = [];
-        state.tileRuns = new Map();
-        roads.center = null;
       }
       state.playerX = (longitude - state.originLon) * mPerDegLonAt(state.originLat);
       state.playerY = (latitude - state.originLat) * M_PER_DEG_LAT;
@@ -1118,6 +1147,40 @@ const OSRM_MODIFIER_TO_ID = {
 // Road tiles: Overpass -> per-tile runs -> 0x20 payloads (grid matches the firmware)
 // ============================================================================
 const roads = { center: null, inflight: false, lastFailMs: 0 };
+// Downloaded map data kept in lat/lon so it survives origin changes (e.g. starting a trip here)
+const mapCache = { ways: [], areas: { blocks: [], parks: [], water: [] } };
+// Area (buildings/parks/water) download state: gen invalidates in-flight requests when the map
+// is reset; pending re-requests the latest spot once the current request finishes
+const areasLoad = { inflight: false, pending: null, gen: 0 };
+
+function projectMapCache() {
+  const oLat = state.originLat, oLon = state.originLon, mLon = mPerDegLonAt(oLat);
+  const proj = (ll) => ll.map(([la, lo]) => ({ x: (lo - oLon) * mLon, y: (la - oLat) * M_PER_DEG_LAT }));
+  state.ways = mapCache.ways.map((w) => ({ tier: w.tier, limit: w.limit, pts: proj(w.ll) }));
+  const a = mapCache.areas;
+  state.areas = { blocks: a.blocks.map(proj), parks: a.parks.map(proj), water: a.water.map(proj) };
+}
+
+function clearMapCache() {
+  mapCache.ways = [];
+  mapCache.areas = { blocks: [], parks: [], water: [] };
+  state.ways = [];
+  state.tileRuns = new Map();
+  state.tileAreas = new Map();
+  state.areas = { blocks: [], parks: [], water: [] };
+  roads.center = null;
+  areasLoad.gen++;
+  areasLoad.pending = null;
+}
+
+// Move the map origin; reuse downloaded roads/areas if they cover the new spot
+function rebaseMap(lat, lon) {
+  state.originLat = lat;
+  state.originLon = lon;
+  if (roads.center && distM(roads.center, { lat, lon }) < 1000) projectMapCache();
+  else clearMapCache();
+}
+
 const tileKey = (tx, ty) => `${tx},${ty}`;
 const tileXOf = (lon) => Math.floor(Math.round(lon * 1e7) / TILE_LON_E7);
 const tileYOf = (lat) => Math.floor(Math.round(lat * 1e7) / TILE_LAT_E7);
@@ -1162,39 +1225,245 @@ function indexWaysIntoTiles(osmWays) {
   return tiles;
 }
 
-function buildTilePayload(tx, ty) {
-  const runs = state.tileRuns.get(tileKey(tx, ty));
-  if (!runs || !runs.length) return null;
+// Sutherland-Hodgman clip of a closed [lat,lon] ring to a lat/lon box
+function clipRingToBox(ring, s, w, n, e) {
+  const edges = [
+    (p) => p[1] >= w, (p) => p[1] <= e, (p) => p[0] >= s, (p) => p[0] <= n
+  ];
+  const cut = [
+    (a, b) => [a[0] + (b[0] - a[0]) * (w - a[1]) / (b[1] - a[1]), w],
+    (a, b) => [a[0] + (b[0] - a[0]) * (e - a[1]) / (b[1] - a[1]), e],
+    (a, b) => [s, a[1] + (b[1] - a[1]) * (s - a[0]) / (b[0] - a[0])],
+    (a, b) => [n, a[1] + (b[1] - a[1]) * (n - a[0]) / (b[0] - a[0])]
+  ];
+  let out = ring;
+  for (let k = 0; k < 4 && out.length; k++) {
+    const inp = out, inside = edges[k];
+    out = [];
+    for (let i = 0; i < inp.length; i++) {
+      const a = inp[(i + inp.length - 1) % inp.length], b = inp[i];
+      const ain = inside(a), bin = inside(b);
+      if (bin) {
+        if (!ain) out.push(cut[k](a, b));
+        out.push(b);
+      } else if (ain) {
+        out.push(cut[k](a, b));
+      }
+    }
+  }
+  return out;
+}
+
+// Buildings / parks / water -> per-tile pieces for the HUD. Polygons crossing a tile edge are
+// clipped with a 3 m overlap so neighbouring pieces meet without hairline seams.
+function indexAreasIntoTiles(areas) {
+  const tiles = new Map();
+  const padLat = 3 / M_PER_DEG_LAT;
+  const groups = [[AREA_TIER_WATER, areas.water], [AREA_TIER_PARK, areas.parks], [AREA_TIER_BUILDING, areas.blocks]];
+  for (const [tier, rings] of groups) {
+    for (const ring of rings) {
+      if (ring.length < 3) continue;
+      let s = 90, n = -90, w = 180, e = -180;
+      for (const [la, lo] of ring) { s = Math.min(s, la); n = Math.max(n, la); w = Math.min(w, lo); e = Math.max(e, lo); }
+      const tx0 = tileXOf(w), tx1 = tileXOf(e), ty0 = tileYOf(s), ty1 = tileYOf(n);
+      const padLon = 3 / mPerDegLonAt(s);
+      for (let tx = tx0; tx <= tx1; tx++) {
+        for (let ty = ty0; ty <= ty1; ty++) {
+          let piece = ring;
+          if (tx0 !== tx1 || ty0 !== ty1) {
+            const bw = tx * TILE_LON_E7 * 1e-7, bs = ty * TILE_LAT_E7 * 1e-7;
+            piece = clipRingToBox(ring, bs - padLat, bw - padLon, bs + TILE_LAT_E7 * 1e-7 + padLat, bw + TILE_LON_E7 * 1e-7 + padLon);
+          }
+          if (piece.length < 3) continue;
+          const k = tileKey(tx, ty);
+          if (!tiles.has(k)) tiles.set(k, []);
+          tiles.get(k).push({ tier, ll: piece });
+        }
+      }
+    }
+  }
+  return tiles;
+}
+
+const ringAreaM2 = (pts) => {
+  let a = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+  return Math.abs(a) / 2;
+};
+
+// Tile-local meter polygons for one tile, simplified to <= 255 vertices, biggest first
+function tileAreaPolys(tx, ty) {
+  const pieces = state.tileAreas.get(tileKey(tx, ty));
+  if (!pieces) return [];
   const mLon = mPerDegLonAt(state.originLat);
   const swLon = (tx * TILE_LON_E7) * 1e-7, swLat = (ty * TILE_LAT_E7) * 1e-7;
+  const polys = [];
+  for (const p of pieces) {
+    let pts = p.ll.map(([lat, lon]) => ({ x: (lon - swLon) * mLon, y: (lat - swLat) * M_PER_DEG_LAT }));
+    const a = pts[0], z = pts[pts.length - 1];
+    if (Math.abs(a.x - z.x) < 0.01 && Math.abs(a.y - z.y) < 0.01) pts.pop(); // ring is implicitly closed
+    const area = ringAreaM2(pts);
+    if (p.tier === AREA_TIER_BUILDING ? area < 40 : area < 150) continue; // sheds/specks vanish at HUD zoom
+    for (let tol = 1; tol < 64; tol *= 2) {
+      pts = simplifyDP(pts, tol);
+      if (pts.length <= 255) break;
+    }
+    if (pts.length < 3 || pts.length > 255) continue;
+    polys.push({ tier: p.tier, pts, area });
+  }
+  return polys;
+}
+
+function buildTilePayload(tx, ty) {
+  const runs = state.tileRuns.get(tileKey(tx, ty)) || [];
+  const areas = tileAreaPolys(tx, ty);
+  if (!runs.length && !areas.length) return null;
+  const mLon = mPerDegLonAt(state.originLat);
+  const swLon = (tx * TILE_LON_E7) * 1e-7, swLat = (ty * TILE_LAT_E7) * 1e-7;
+  // Roads in tile-local meters, simplified (1.5 m is sub-pixel at HUD zoom): fewer segments
+  // for the device to draw and fewer bytes over BLE
+  const roadsM = runs.map((r) => ({
+    tier: r.tier,
+    pts: simplifyDP(r.ll.map(([lat, lon]) => ({ x: (lon - swLon) * mLon, y: (lat - swLat) * M_PER_DEG_LAT })), 1.5)
+  }));
   // Highways and arterials first so the byte budget drops local streets before main roads
-  const sorted = runs.slice().sort((a, b) => b.tier - a.tier);
+  const sorted = roadsM.sort((a, b) => b.tier - a.tier);
   const chosen = [];
   let bytes = 10;
   for (const r of sorted) {
-    const sz = 2 + r.ll.length * 4;
+    const sz = 2 + r.pts.length * 4;
     if (bytes + sz > DEVICE_MAX_TILE_BYTES || chosen.length >= 1024) continue;
     chosen.push(r);
     bytes += sz;
   }
+  // Then map detail with what's left: water and parks, then the largest buildings
+  const prio = (p) => (p.tier === AREA_TIER_BUILDING ? 0 : 1e12) + p.area;
+  const chosenAreas = [];
+  for (const p of areas.sort((a, b) => prio(b) - prio(a))) {
+    const sz = 2 + p.pts.length * 4;
+    if (bytes + sz > DEVICE_MAX_TILE_BYTES || chosen.length + chosenAreas.length >= 1024) continue;
+    chosenAreas.push(p);
+    bytes += sz;
+  }
+  chosenAreas.sort((a, b) => b.tier - a.tier); // draw order: water, parks, buildings
   const buf = new ArrayBuffer(bytes);
   const dv = new DataView(buf);
   dv.setInt32(0, tx, true);
   dv.setInt32(4, ty, true);
-  dv.setUint16(8, chosen.length, true);
+  dv.setUint16(8, chosen.length + chosenAreas.length, true);
   let o = 10;
   const clamp16 = (v) => Math.max(-32767, Math.min(32767, Math.round(v)));
   for (const r of chosen) {
     dv.setUint8(o, r.tier);
-    dv.setUint8(o + 1, r.ll.length);
+    dv.setUint8(o + 1, r.pts.length);
     o += 2;
-    for (const [lat, lon] of r.ll) {
-      dv.setInt16(o, clamp16((lon - swLon) * mLon), true);
-      dv.setInt16(o + 2, clamp16((lat - swLat) * M_PER_DEG_LAT), true);
+    for (const pt of r.pts) {
+      dv.setInt16(o, clamp16(pt.x), true);
+      dv.setInt16(o + 2, clamp16(pt.y), true);
+      o += 4;
+    }
+  }
+  for (const p of chosenAreas) {
+    dv.setUint8(o, p.tier);
+    dv.setUint8(o + 1, p.pts.length);
+    o += 2;
+    for (const pt of p.pts) {
+      dv.setInt16(o, clamp16(pt.x), true);
+      dv.setInt16(o + 2, clamp16(pt.y), true);
       o += 4;
     }
   }
   return new Uint8Array(buf);
+}
+
+// Public Overpass servers are busy at times (HTTP 502/504): fall back to mirrors
+const OVERPASS_URLS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://lz4.overpass-api.de/api/interpreter"
+];
+async function overpassQuery(query) {
+  let last = null;
+  for (const url of OVERPASS_URLS) {
+    try {
+      const res = await fetch(url, { method: "POST", body: "data=" + encodeURIComponent(query) });
+      if (res.ok) return await res.json();
+      last = new Error(`${new URL(url).host} HTTP ${res.status}`);
+    } catch (err) {
+      last = err;
+    }
+  }
+  throw last;
+}
+
+// Joins open member ways of a multipolygon (e.g. a river) into closed rings
+function assembleRings(segs) {
+  const rings = [], pool = segs.map((x) => x.slice());
+  // [lat, lon] points; 5e-6 deg ~ 0.5 m
+  const same = (a, b) => Math.abs(a[0] - b[0]) < 5e-6 && Math.abs(a[1] - b[1]) < 5e-6;
+  while (pool.length) {
+    let ring = pool.shift(), grew = true;
+    while (grew && !same(ring[0], ring[ring.length - 1])) {
+      grew = false;
+      for (let i = 0; i < pool.length; i++) {
+        const seg = pool[i], end = ring[ring.length - 1];
+        if (same(end, seg[0])) ring = ring.concat(seg.slice(1));
+        else if (same(end, seg[seg.length - 1])) ring = ring.concat(seg.slice(0, -1).reverse());
+        else continue;
+        pool.splice(i, 1);
+        grew = true;
+        break;
+      }
+    }
+    rings.push(ring);
+  }
+  return rings;
+}
+
+// City blocks, parks and water for the app's radar (~1 km box), loaded after the roads.
+async function loadAreasAround(lat, lon) {
+  if (areasLoad.inflight) { areasLoad.pending = { lat, lon }; return; }
+  areasLoad.inflight = true;
+  const gen = areasLoad.gen;
+  const toLL = (p) => [p.lat, p.lon];
+  try {
+    const dLat = 0.009, dLon = 0.012;
+    const bb = `${(lat - dLat).toFixed(4)},${(lon - dLon).toFixed(4)},${(lat + dLat).toFixed(4)},${(lon + dLon).toFixed(4)}`;
+    const osm = await overpassQuery(`[out:json][timeout:25];(
+      way["building"](${bb});
+      way["leisure"~"^(park|garden|pitch|playground)$"](${bb});
+      way["landuse"~"^(grass|recreation_ground|cemetery|forest|meadow)$"](${bb});
+      way["natural"~"^(water|wood)$"](${bb});
+      relation["natural"="water"](${bb});
+      relation["waterway"="riverbank"](${bb});
+    );out geom qt;`);
+    if (gen !== areasLoad.gen || !roads.center || distM(roads.center, { lat, lon }) > 1500) return; // stale
+    const areas = { blocks: [], parks: [], water: [] };
+    for (const el of osm.elements || []) {
+      const t = el.tags || {};
+      if (el.type === "way" && el.geometry && el.geometry.length > 2) {
+        const pts = el.geometry.map(toLL);
+        if (t.building) areas.blocks.push(pts);
+        else if (t.natural === "water") areas.water.push(pts);
+        else areas.parks.push(pts);
+      } else if (el.type === "relation" && el.members) {
+        const outer = el.members.filter((m) => m.role !== "inner" && m.geometry).map((m) => m.geometry.map(toLL));
+        for (const ring of assembleRings(outer)) areas.water.push(ring);
+      }
+    }
+    mapCache.areas = areas;
+    projectMapCache();
+    state.tileAreas = indexAreasIntoTiles(areas);
+    ble.lastTileKey = null; // resend the tiles around the player with the new detail
+    logMsg(`Loaded ${areas.blocks.length} buildings, ${areas.parks.length} parks, ${areas.water.length} water areas for the radar.`);
+  } catch (err) {
+    logMsg(`Map detail fetch failed: ${errText(err)}`);
+  } finally {
+    areasLoad.inflight = false;
+    const next = areasLoad.pending;
+    areasLoad.pending = null;
+    if (next && roads.center && distM(roads.center, next) < 1500) loadAreasAround(next.lat, next.lon);
+  }
 }
 
 async function ensureRoadsAround(lat, lon) {
@@ -1209,10 +1478,7 @@ async function ensureRoadsAround(lat, lon) {
     const dLat = 0.018, dLon = 0.024; // ~2 km around the player
     const bbox = `${(lat - dLat).toFixed(4)},${(lon - dLon).toFixed(4)},${(lat + dLat).toFixed(4)},${(lon + dLon).toFixed(4)}`;
     const query = `[out:json][timeout:20];way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street)$"](${bbox});out geom qt;`;
-    const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(query) });
-    if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
-    const osm = await res.json();
-    const mLon = mPerDegLonAt(state.originLat);
+    const osm = await overpassQuery(query);
     const osmWays = [];
     for (const el of osm.elements || []) {
       if (el.type !== "way" || !el.geometry || el.geometry.length < 2) continue;
@@ -1222,15 +1488,13 @@ async function ensureRoadsAround(lat, lon) {
         ll: el.geometry.map((p) => [p.lat, p.lon])
       });
     }
-    state.ways = osmWays.map((w) => ({
-      tier: w.tier,
-      limit: w.limit,
-      pts: w.ll.map(([la, lo]) => ({ x: (lo - state.originLon) * mLon, y: (la - state.originLat) * M_PER_DEG_LAT }))
-    }));
+    mapCache.ways = osmWays;
+    projectMapCache();
     state.tileRuns = indexWaysIntoTiles(osmWays);
     roads.center = { lat, lon };
     ble.lastTileKey = null; // force a tile refresh on the HUD
     logMsg(`Loaded ${osmWays.length} OSM roads (${state.tileRuns.size} tiles) around the player.`);
+    loadAreasAround(lat, lon);
   } catch (err) {
     roads.lastFailMs = Date.now();
     logMsg(`Road fetch failed: ${err.message}`);
@@ -1854,10 +2118,7 @@ async function planRoute(src, via, dest, opts = {}) {
   if (!data.routes || !data.routes.length) throw new Error("No driving route found");
   const route = data.routes[0];
 
-  if (!keepOrigin) {
-    state.originLat = src.lat;
-    state.originLon = src.lon;
-  }
+  if (!keepOrigin) rebaseMap(src.lat, src.lon);
   const oLat = state.originLat, oLon = state.originLon, mLon = mPerDegLonAt(oLat);
   const fullPts = route.geometry.coordinates.map(([lon, lat]) => ({ x: (lon - oLon) * mLon, y: (lat - oLat) * M_PER_DEG_LAT }));
 
@@ -1897,12 +2158,7 @@ async function planRoute(src, via, dest, opts = {}) {
 
   setNavRoute(simp.pts, maneuvers, route.duration);
   state.hasRealRoute = true;
-  if (!keepOrigin) {
-    state.speedLimitMph = 0; // unknown until a road with a maxspeed tag is under the player
-    state.ways = [];
-    state.tileRuns = new Map();
-    roads.center = null;
-  }
+  if (!keepOrigin && !roads.center) state.speedLimitMph = 0; // unknown until a road with a maxspeed tag is under the player
   nav.progressM = 0;
   state.gpsOrigin = true;
   autoDrive = simulating;
@@ -1944,15 +2200,26 @@ function sizeRadar() {
   radarCanvas.height = Math.round(radarCss * radarDpr);
 }
 window.addEventListener("resize", sizeRadar);
+if ("ResizeObserver" in window) new ResizeObserver(sizeRadar).observe(radarCanvas);
 
-function wayBounds(w) {
-  if (!w.bb) {
+// Cached bounding box of a point list (roads use w.pts, areas are plain arrays)
+function ptsBounds(pts) {
+  if (!pts.bb) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const p of w.pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
-    w.bb = [x0, y0, x1, y1];
+    for (const p of pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+    pts.bb = [x0, y0, x1, y1];
   }
-  return w.bb;
+  return pts.bb;
 }
+const wayBounds = (w) => ptsBounds(w.pts);
+
+// GTA V-style radar palette, pushed for contrast, drawn with bold "ink" outlines (GTA's
+// cartoon map art): every road and building gets a dark casing so the map reads at a glance
+const RADAR = {
+  land: "#20242a", block: "#3d434c", ink: "#0d0f12", park: "#2f5d3b", water: "#1d4f7d",
+  local: "#8a9199", art: "#cdd2d8", hwy: "#f5f6f7",
+  route: "#b45cff", routeCasing: "#14061f", rim: "#0b0c0e", rimInner: "rgba(255,255,255,0.16)", vignette: 0.3
+};
 
 // GTA-style circular radar: map rotates with heading, player in the centre, N on the rim
 function renderRadar() {
@@ -1961,7 +2228,7 @@ function renderRadar() {
   g.clearRect(0, 0, S, S);
   g.save();
   g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.clip();
-  g.fillStyle = "#0e1116"; g.fillRect(0, 0, S, S);
+  g.fillStyle = RADAR.land; g.fillRect(0, 0, S, S);
   const rad = (state.headingDeg * Math.PI) / 180;
 
   if (simulating || state.hasRealRoute || currentGpsCoords) {
@@ -1975,25 +2242,44 @@ function renderRadar() {
       pts.forEach((pt, i) => { const [x, y] = P(pt.x, pt.y); if (i) g.lineTo(x, y); else g.moveTo(x, y); });
       g.stroke();
     };
+    const near = (pts) => {
+      const [x0, y0, x1, y1] = ptsBounds(pts);
+      return x1 > px - reach && x0 < px + reach && y1 > py - reach && y0 < py + reach;
+    };
+    const fillAreas = (list, color, edge) => {
+      g.fillStyle = color;
+      if (edge) { g.strokeStyle = edge; g.lineWidth = 1.4; }
+      for (const pts of list) {
+        if (!near(pts)) continue;
+        g.beginPath();
+        pts.forEach((pt, i) => { const [x, y] = P(pt.x, pt.y); if (i) g.lineTo(x, y); else g.moveTo(x, y); });
+        g.closePath();
+        g.fill("evenodd");
+        if (edge) g.stroke();
+      }
+    };
+    fillAreas(state.areas.water, RADAR.water);
+    fillAreas(state.areas.parks, RADAR.park);
+    fillAreas(state.areas.blocks, RADAR.block, RADAR.ink);
     g.lineCap = "round"; g.lineJoin = "round";
     const visible = state.ways.filter((w) => {
       if (w.pts.length < 2) return false;
       const [x0, y0, x1, y1] = wayBounds(w);
       return x1 > px - reach && x0 < px + reach && y1 > py - reach && y0 < py + reach;
     });
+    // Ink casings under every road, then the cores
+    const coreW = (t) => (t === 3 ? 7.5 : (t === 2 ? 5.5 : 3.4)) * boost;
+    g.strokeStyle = RADAR.ink;
+    for (const w of visible) { g.lineWidth = coreW(w.tier) + 3.5 * boost; stroke(w.pts); }
     for (const w of visible) {
-      if (w.tier < 2) continue;
-      g.strokeStyle = "#07080b"; g.lineWidth = (w.tier === 3 ? 9 : 7) * boost; stroke(w.pts);
-    }
-    for (const w of visible) {
-      g.strokeStyle = w.tier === 3 ? "#9ba3b5" : (w.tier === 2 ? "#6b7383" : "#363b46");
-      g.lineWidth = (w.tier === 3 ? 6 : (w.tier === 2 ? 4.5 : 2.6)) * boost;
+      g.strokeStyle = w.tier === 3 ? RADAR.hwy : (w.tier === 2 ? RADAR.art : RADAR.local);
+      g.lineWidth = coreW(w.tier);
       stroke(w.pts);
     }
     if (state.routePts.length >= 2) {
       const route = [{ x: px, y: py }, ...state.routePts.slice(state.closestRouteIdx)];
-      g.strokeStyle = "#000"; g.lineWidth = 9 * boost; stroke(route);
-      g.strokeStyle = "#FFB800"; g.lineWidth = 5 * boost; stroke(route);
+      g.strokeStyle = RADAR.routeCasing; g.lineWidth = 12 * boost; stroke(route);
+      g.strokeStyle = RADAR.route; g.lineWidth = 7 * boost; stroke(route);
       const edge = ([x, y]) => {
         const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy), m = R - 15;
         return d > m ? [cx + (dx * m) / d, cy + (dy * m) / d] : [x, y];
@@ -2006,7 +2292,7 @@ function renderRadar() {
         g.fillStyle = "#FFD700"; g.fillRect(x - 3, y - 3, 6, 6);
       }
       const [dx, dy] = edge(P(state.routePts[last].x, state.routePts[last].y));
-      for (const [r, c] of [[10, "#000"], [8, "#FFB800"], [6, "#000"], [4, "#FFB800"]]) {
+      for (const [r, c] of [[10, "#000"], [8, RADAR.route], [6, "#000"], [4, RADAR.route]]) {
         g.fillStyle = c; g.beginPath(); g.arc(dx, dy, r, 0, Math.PI * 2); g.fill();
       }
     }
@@ -2021,13 +2307,13 @@ function renderRadar() {
     g.fillText(gpsWatchId !== null ? "Locating…" : "Your location appears here", cx, cy + 40);
   }
   const vg = g.createRadialGradient(cx, cy, R * 0.55, cx, cy, R);
-  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.55)");
+  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, `rgba(0,0,0,${RADAR.vignette})`);
   g.fillStyle = vg; g.fillRect(0, 0, S, S);
   g.restore();
 
   // Rim, north marker, player arrow
-  g.lineWidth = 6; g.strokeStyle = "#FFB800"; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke();
-  g.lineWidth = 1.5; g.strokeStyle = "rgba(0,0,0,0.6)"; g.beginPath(); g.arc(cx, cy, R - 3.5, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = 9; g.strokeStyle = RADAR.rim; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = 2; g.strokeStyle = RADAR.rimInner; g.beginPath(); g.arc(cx, cy, R - 5, 0, Math.PI * 2); g.stroke();
   const nx = cx - Math.sin(rad) * R, ny = cy - Math.cos(rad) * R;
   g.fillStyle = "#000"; g.beginPath(); g.arc(nx, ny, 11, 0, Math.PI * 2); g.fill();
   g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.stroke();
@@ -2059,6 +2345,10 @@ function renderStatusUi() {
     const [num, unit] = etaParts();
     document.getElementById("etaMin").textContent = `${num} ${unit}`;
     document.getElementById("etaDist").textContent = `${(state.destDistM / 1609.34).toFixed(1)} mi`;
+    // Both bars drain like GTA health/armor: green = trip remaining, blue = distance to the next turn (500 m scale)
+    const tripLeft = nav.total > 0 ? Math.max(0, Math.min(1, state.destDistM / nav.total)) : 1;
+    document.getElementById("barTrip").style.width = `${Math.round(tripLeft * 100)}%`;
+    document.getElementById("barTurn").style.width = `${Math.round(Math.min(1, state.turnDistM / 500) * 100)}%`;
     turnIconCtx.setTransform(1, 0, 0, 1, 0, 0);
     turnIconCtx.clearRect(0, 0, 104, 104);
     drawManeuverArrow(52, 52, 64, state.maneuverId || 1, "#FFB800", "#000", turnIconCtx);
@@ -2135,6 +2425,7 @@ function updateSheet() {
   }
   cta.classList.toggle("dark", navigating || arrived);
   document.querySelector(".sheet").classList.toggle("is-trip", navigating || arrived);
+  document.querySelector(".app").classList.toggle("nav-mode", navigating || arrived);
   document.getElementById("inpDest").disabled = navigating;
   document.getElementById("inpStart").disabled = navigating;
   const showRecents = !activeTrip && document.getElementById("recentChips").childElementCount > 0;
@@ -2226,8 +2517,7 @@ function setSimulating(on) {
       nav.maneuvers = [];
       nav.cum = [0];
       nav.total = 0;
-      state.ways = [];
-      state.tileRuns = new Map();
+      clearMapCache();
       state.maneuverId = 0;
       state.turnDistM = 0;
       state.destDistM = 0;
