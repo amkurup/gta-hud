@@ -234,6 +234,7 @@
     <div class="row">
       <button id="btnConnectBle" class="primary">Connect HUD (BLE)</button>
       <button id="btnPasteTrip">Paste trip / Maps link</button>
+      <a href="setup.html" style="color: var(--gold); font-size: 12px;">Set up "Send to HUD" on iPhone</a>
       <button id="btnUseCurrentLoc">Use Current Location (GPS)</button>
       <button id="btnLiveGpsTrack">Live GPS Tracking: Off</button>
     </div>
@@ -1552,6 +1553,20 @@ function decodeSeg(s) {
   try { return decodeURIComponent(s.replace(/\+/g, " ")); } catch { return s; }
 }
 
+// "#go?" query. "share=" is always last and swallows the rest of the string, so a shared link
+// still works even if the Shortcut left its own "&"/"?" unencoded.
+function parseGoQuery(q) {
+  const i = q.indexOf("share=");
+  if (i >= 0 && (i === 0 || q[i - 1] === "&")) {
+    let share = q.slice(i + 6);
+    try { share = decodeURIComponent(share); } catch { /* keep raw */ }
+    const params = new URLSearchParams(q.slice(0, Math.max(0, i - 1)));
+    params.set("share", share);
+    return parseGoParams(params);
+  }
+  return parseGoParams(new URLSearchParams(q));
+}
+
 function parseGoParams(params) {
   const via = (params.get("via") || "").split("|").map((v) => tripPlace(v)).filter(Boolean);
   const dest = tripPlace(params.get("dest"), params.get("name") || "");
@@ -1586,7 +1601,7 @@ function parseTripInput(raw) {
   const path = u.pathname;
 
   // Our own trip links (e.g. pasted from the "Send to HUD" Shortcut)
-  if (u.hash.startsWith("#go?")) return parseGoParams(new URLSearchParams(u.hash.slice(4)));
+  if (u.hash.startsWith("#go?")) return parseGoQuery(u.hash.slice(4));
 
   // Apple Maps
   if (host === "maps.apple.com" || host === "maps.apple" || host.endsWith(".maps.apple.com")) {
@@ -1786,7 +1801,7 @@ async function reroute(here) {
 
 // Incoming trip from the URL: "#go?dest=..|share=.." (iOS Shortcut) or "?title&text&url" (Android share)
 function tripFromLocation() {
-  if (location.hash.startsWith("#go?")) return parseGoParams(new URLSearchParams(location.hash.slice(4)));
+  if (location.hash.startsWith("#go?")) return parseGoQuery(location.hash.slice(4));
   const q = new URLSearchParams(location.search);
   if (q.has("title") || q.has("text") || q.has("url")) {
     return parseTripInput([q.get("title"), q.get("text"), q.get("url")].filter(Boolean).join("\n"));
