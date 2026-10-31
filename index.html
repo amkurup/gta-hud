@@ -11,257 +11,244 @@
 <style>
   :root {
     --bg: #0b0d12;
-    --panel: #141821;
-    --border: #262c3a;
     --gold: #ffb800;
-    --text: #f3f5f8;
-    --muted: #949ba8;
-    --accent: #00e676;
-    --danger: #ff3b30;
+    --gold-press: #e6a600;
+    --ink: #0b0b0f;
+    --field: #f2f3f5;
+    --muted: #8e929b;
+    --line: #e6e7eb;
+    --ok: #00e676;
+    --bad: #ff3b30;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
   body {
     background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    padding: 20px;
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, sans-serif;
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 18px;
+    justify-content: center;
+    min-height: 100vh;
   }
-  header {
-    text-align: center;
-    max-width: 780px;
+  button { font-family: inherit; cursor: pointer; }
+  .app { width: 100%; max-width: 480px; min-height: 100vh; display: flex; flex-direction: column; }
+
+  /* ---------- top: radar ---------- */
+  .top { padding: calc(env(safe-area-inset-top) + 14px) 18px 30px; color: #fff; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 17px; letter-spacing: 0.01em; }
+  .brand svg { width: 26px; height: 26px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px; padding: 8px 14px; font-size: 13px; font-weight: 600; color: #fff;
   }
-  header h1 {
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    margin-bottom: 4px;
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); flex: 0 0 auto; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 10px rgba(0, 230, 118, 0.8); }
+
+  .turn-card {
+    display: flex; align-items: center; gap: 12px; margin-top: 16px;
+    background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 22px; padding: 10px 14px 10px 10px;
   }
-  header p {
-    font-size: 13px;
-    color: var(--muted);
+  .turn-card[hidden] { display: none; }
+  .turn-card canvas { width: 52px; height: 52px; border-radius: 16px; background: #000; flex: 0 0 auto; }
+  .turn-main { flex: 1; min-width: 0; }
+  .turn-dist { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; }
+  .turn-street { font-size: 14px; color: #c8ccd4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .turn-eta { text-align: right; font-size: 13px; color: #c8ccd4; }
+  .turn-eta b { display: block; font-size: 20px; color: var(--gold); }
+
+  .radar-wrap { position: relative; display: flex; justify-content: center; margin-top: 18px; }
+  #radar { width: min(76vw, 300px); aspect-ratio: 1; display: block; }
+  .speed-chip {
+    position: absolute; left: calc(50% - min(38vw, 150px) - 6px); bottom: -4px;
+    width: 70px; height: 70px; border-radius: 50%;
+    background: #141821; border: 3px solid rgba(255, 255, 255, 0.12);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
   }
-  .bezel-wrap {
-    background: #050608;
-    border: 2px solid #2b3140;
-    border-radius: 18px;
-    padding: 14px 18px;
-    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.65);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
+  .speed-chip b { font-size: 24px; line-height: 1; }
+  .speed-chip span { font-size: 10px; color: #9aa0ab; font-weight: 600; letter-spacing: 0.06em; }
+  .speed-chip.over { border-color: var(--bad); }
+  .limit-chip {
+    position: absolute; left: calc(50% - min(38vw, 150px) + 52px); bottom: 44px;
+    width: 34px; height: 34px; border-radius: 50%; background: #fff; color: #000;
+    border: 3px solid var(--bad); font-size: 13px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
   }
-  .bezel-header {
-    width: 480px;
-    display: flex;
-    justify-content: space-between;
-    font-size: 11px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+  .limit-chip[hidden] { display: none; }
+
+  /* ---------- bottom sheet ---------- */
+  .sheet {
+    background: #fff; border-radius: 34px 34px 0 0; flex: 1;
+    padding: 10px 18px calc(env(safe-area-inset-bottom) + 22px);
+    box-shadow: 0 -12px 34px rgba(0, 0, 0, 0.35);
   }
-  canvas#hudCanvas {
-    width: 480px;
-    height: auto;
-    background: #000000;
-    border-radius: 6px;
-    cursor: pointer;
-    display: block;
-    border: 1px solid #1e222d;
+  .grabber { width: 44px; height: 5px; border-radius: 3px; background: #d9dadf; margin: 0 auto 14px; }
+  .kicker { font-size: 14px; font-weight: 700; color: var(--muted); margin: 0 6px; min-height: 18px; }
+  h1 { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; margin: 2px 6px 16px; line-height: 1.1; }
+  .field {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--field); border-radius: 999px; height: 60px; padding: 0 10px 0 24px; margin-bottom: 12px;
   }
-  .grid-panels {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-    gap: 16px;
-    width: 100%;
-    max-width: 780px;
+  .field input {
+    flex: 1; min-width: 0; border: 0; background: transparent; outline: none;
+    font-size: 17px; font-family: inherit; color: var(--ink);
   }
-  .card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+  .field input::placeholder { color: #a6a9b0; }
+  .field .ico { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; color: #9a9ea6; border: 0; background: transparent; border-radius: 50%; }
+  .field button.ico:active { background: #e3e4e8; }
+  .field .ico svg { width: 22px; height: 22px; }
+  .via { font-size: 13px; color: var(--muted); margin: -4px 8px 8px; }
+  .sheet.is-trip .field, .sheet.is-trip .via { display: none; }
+  .via:empty { display: none; }
+  .section-label { font-weight: 700; font-size: 15px; margin: 16px 6px 10px; }
+  .section-label[hidden], .chips[hidden] { display: none; }
+  .chips { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip {
+    flex: 0 0 auto; max-width: 190px; background: var(--field); border: 0; border-radius: 999px;
+    padding: 16px 22px; font-size: 15px; font-weight: 650; color: var(--ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .card h2 {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--gold);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+  .chip.resume { background: #fff4d6; }
+  .chip:active { background: #e3e4e8; }
+  .cta-row { display: flex; gap: 12px; margin-top: 20px; align-items: center; }
+  .cta {
+    flex: 1; height: 66px; border-radius: 999px; border: 0; background: var(--gold); color: #000;
+    font-size: 19px; font-weight: 800; letter-spacing: 0.01em;
   }
-  .row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    flex-wrap: wrap;
+  .cta:active { background: var(--gold-press); }
+  .cta.dark { background: #16181d; color: #fff; }
+  .round {
+    width: 66px; height: 66px; border-radius: 50%; border: 0; background: var(--ink); color: #fff;
+    position: relative; display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
   }
-  button {
-    background: #232938;
-    color: var(--text);
-    border: 1px solid #384157;
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s;
+  .round svg { width: 26px; height: 26px; }
+  .round .dot { position: absolute; top: 13px; right: 13px; border: 2px solid var(--ink); width: 13px; height: 13px; }
+  .hint { min-height: 18px; margin: 10px 8px 0; font-size: 13px; color: var(--muted); }
+  .links { display: flex; justify-content: center; gap: 18px; margin-top: 18px; font-size: 13px; }
+  .links a, .links summary { color: var(--muted); text-decoration: none; font-weight: 600; }
+
+  /* ---------- developer options ---------- */
+  details.dev { margin-top: 14px; }
+  details.dev > summary { list-style: none; text-align: center; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+  details.dev > summary::-webkit-details-marker { display: none; }
+  .dev-body { margin-top: 12px; background: #f6f7f9; border: 1px solid var(--line); border-radius: 22px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .dev-head { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  canvas#hudCanvas { width: 100%; height: auto; background: #000; border-radius: 10px; display: block; cursor: pointer; }
+  .dev-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .dev-row button, .dev-row select {
+    background: #fff; color: var(--ink); border: 1px solid #d9dbe0; border-radius: 999px;
+    padding: 9px 14px; font-size: 13px; font-weight: 600; font-family: inherit;
   }
-  button:hover { background: #2e364a; }
-  button.primary {
-    background: var(--gold);
-    color: #090a0d;
-    border-color: var(--gold);
-    font-weight: 600;
-  }
-  button.primary:hover { background: #ffc629; }
-  button.active {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  label {
-    font-size: 12px;
-    color: var(--muted);
-    display: flex;
-    justify-content: space-between;
-    width: 100%;
-  }
-  input[type="range"] {
-    width: 100%;
-    accent-color: var(--gold);
-  }
-  select {
-    background: #0d1017;
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 7px 10px;
-    font-size: 12px;
-  }
-  input[type="text"] {
-    flex: 1;
-    background: #0d1017;
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 7px 10px;
-    font-size: 12px;
-  }
-  .trip-sheet {
-    position: fixed;
-    left: 0; right: 0; bottom: 0;
-    z-index: 50;
-    background: #141821;
-    border-top: 2px solid var(--gold);
-    padding: 16px 18px 22px;
-    box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.6);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .trip-sheet[hidden] { display: none; }
-  .trip-title { font-size: 17px; font-weight: 700; }
-  .trip-sub { font-size: 13px; color: var(--muted); }
-  button.big { font-size: 18px; padding: 14px 22px; flex: 1; }
+  .dev-row button.active { border-color: var(--gold); background: #fff4d6; }
+  .dev label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+  .dev input[type="range"] { width: 100%; accent-color: var(--gold); }
   .status-log {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
-    color: #9ecbff;
-    background: #090b10;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px;
-    height: 92px;
-    overflow-y: auto;
-    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #3a4252;
+    background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 8px; height: 120px;
+    overflow-y: auto; white-space: pre-wrap;
   }
 </style>
 </head>
 <body>
-
-<header>
-  <h1>ESP32 GTA San Andreas HUD</h1>
-  <p>WebBLE companion (Chrome/Edge, or Bluefy on iOS) + HUD simulator (320x172 or 480x320). Streams route, roads and telemetry to ESP32-C6 / ESP32-S3.</p>
-</header>
-
-<div class="bezel-wrap">
-  <div class="bezel-header">
-    <span id="modeBadge">NORMAL MODE · MAP VIEW</span>
-    <span>CLICK: MAP/TURN VIEW · TOP-RIGHT: HUD MODE</span>
-  </div>
-  <canvas id="hudCanvas" width="320" height="172"></canvas>
-</div>
-
-<div class="grid-panels">
-  <!-- Simulator & Display Controls -->
-  <div class="card">
-    <h2>1. HUD Simulator & Drive Sim</h2>
-    <div class="row">
-      <select id="selDisplay">
-        <option value="compact">Waveshare C6 1.47" (320x172)</option>
-        <option value="full">Hosyond S3 4.0" (480x320)</option>
-      </select>
-    </div>
-    <div class="row">
-      <button id="btnSimDrive" class="primary">Pause Auto-Drive</button>
-      <button id="btnToggleMode">Switch to Turn View</button>
-      <button id="btnMirror">HUD Mode (bright + mirror)</button>
-      <button id="btnDemoToHud">Demo → HUD: Off</button>
-    </div>
-    <div>
-      <label><span>Vehicle Speed (Finer Near-0 MPH Zoom)</span><span id="lblSpeed">38.0 mph · 1.92 m/px</span></label>
-      <input type="range" id="rngSpeed" min="0" max="80" step="0.5" value="38" />
-    </div>
-    <div>
-      <label><span>Vehicle Heading</span><span id="lblHeading">15°</span></label>
-      <input type="range" id="rngHeading" min="0" max="359" value="15" />
-    </div>
-    <div>
-      <label><span>Route Progress</span><span id="lblProgress">18%</span></label>
-      <input type="range" id="rngProgress" min="0" max="100" value="18" />
-    </div>
-  </div>
-
-  <!-- iPhone Bluefy WebBLE + Source/Destination Routing -->
-  <div class="card">
-    <h2>2. Navigation Route & Bluefy WebBLE</h2>
-    <div class="row">
-      <button id="btnConnectBle" class="primary">Connect HUD (BLE)</button>
-      <button id="btnPasteTrip">Paste trip / Maps link</button>
-      <a href="setup.html" style="color: var(--gold); font-size: 12px;">Set up "Send to HUD" on iPhone</a>
-      <button id="btnUseCurrentLoc">Use Current Location (GPS)</button>
-      <button id="btnLiveGpsTrack">Live GPS Tracking: Off</button>
-    </div>
-    <div>
-      <label for="inpStart"><span>Source (Address, Place, or lat,lon)</span><span id="lblSourceCoords"></span></label>
-      <div class="row" style="margin-top: 4px;">
-        <input type="text" id="inpStart" value="" placeholder="Enter source address or click 'Use Current Location'" />
+<div class="app">
+  <section class="top">
+    <div class="topbar">
+      <div class="brand">
+        <svg viewBox="0 0 24 24"><path d="M12 2.5 20 21l-8-5.2L4 21z" fill="#FFB800"/></svg>
+        GTA HUD
       </div>
+      <button class="pill" id="linkPill" type="button"><span class="dot" id="linkDot"></span><span id="linkText">HUD not connected</span></button>
     </div>
-    <div>
-      <label for="inpDest"><span>Destination (Address, Place, or lat,lon)</span><span id="lblDestCoords"></span></label>
-      <div class="row" style="margin-top: 4px;">
-        <input type="text" id="inpDest" value="" placeholder="Enter destination address or place..." />
-        <button id="btnFetchReal" class="primary">Get Route & Roads</button>
-      </div>
-    </div>
-    <div class="status-log" id="statusLog">Ready. Share a place from Apple/Google Maps ("Send to HUD"), tap Paste trip, or enter a destination (address, place, lat,lon or a Maps link).</div>
-  </div>
-</div>
 
-<div id="tripSheet" class="trip-sheet" hidden>
-  <div class="trip-title" id="tripTitle">Navigate</div>
-  <div class="trip-sub" id="tripSub"></div>
-  <div class="row">
-    <button id="btnTripStart" class="primary big">Start</button>
-    <button id="btnTripDismiss">Dismiss</button>
-  </div>
+    <div class="turn-card" id="turnCard" hidden>
+      <canvas id="turnIcon" width="104" height="104"></canvas>
+      <div class="turn-main">
+        <div class="turn-dist" id="turnDist">—</div>
+        <div class="turn-street" id="turnStreet"></div>
+      </div>
+      <div class="turn-eta"><b id="etaMin">—</b><span id="etaDist"></span></div>
+    </div>
+
+    <div class="radar-wrap">
+      <canvas id="radar"></canvas>
+      <div class="speed-chip" id="speedChip"><b id="speedVal">0</b><span>MPH</span></div>
+      <div class="limit-chip" id="limitChip" hidden></div>
+    </div>
+  </section>
+
+  <section class="sheet">
+    <div class="grabber"></div>
+    <div class="kicker" id="sheetKicker"></div>
+    <h1 id="sheetTitle">Where to?</h1>
+
+    <div class="field">
+      <input id="inpStart" type="text" placeholder="Current location" autocomplete="off" />
+      <span class="ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+      </span>
+    </div>
+    <div class="field">
+      <input id="inpDest" type="text" placeholder="Where are you going?" autocomplete="off" enterkeyhint="go" />
+      <button class="ico" id="btnPasteTrip" type="button" title="Paste a Maps link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2.5"/><path d="M9 4.5V3h6v1.5M9.5 10h5M9.5 14h5"/></svg>
+      </button>
+    </div>
+    <div class="via" id="tripSub"></div>
+
+    <div class="section-label" id="recentLabel" hidden>Recent places</div>
+    <div class="chips" id="recentChips" hidden></div>
+
+    <div class="cta-row">
+      <button class="cta" id="btnStart" type="button">Start</button>
+      <button class="round" id="btnConnectBle" type="button" title="Connect HUD">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg>
+        <span class="dot" id="btDot"></span>
+      </button>
+    </div>
+    <div class="hint" id="hint"></div>
+
+    <div class="links">
+      <a href="setup.html">Set up "Send to HUD"</a>
+    </div>
+
+    <details class="dev" id="devPanel">
+      <summary>Developer options</summary>
+      <div class="dev-body">
+        <div class="dev-head"><span id="modeBadge">NORMAL MODE · MAP VIEW</span><span>HUD screen preview</span></div>
+        <canvas id="hudCanvas" width="320" height="172"></canvas>
+        <div class="dev-row">
+          <select id="selDisplay">
+            <option value="compact">Waveshare C6 1.47" (320x172)</option>
+            <option value="full">Hosyond S3 4.0" (480x320)</option>
+          </select>
+          <button id="btnToggleMode" type="button">Switch to Turn View</button>
+          <button id="btnMirror" type="button">HUD Mode</button>
+        </div>
+        <div class="dev-row">
+          <button id="btnSimDrive" type="button">▶ Simulate drive</button>
+          <button id="btnSimPause" type="button">⏸ Pause</button>
+          <button id="btnLiveGpsTrack" type="button">Live GPS: Off</button>
+        </div>
+        <div>
+          <label><span>Speed</span><span id="lblSpeed">38 mph</span></label>
+          <input type="range" id="rngSpeed" min="0" max="80" step="0.5" value="38" />
+        </div>
+        <div>
+          <label><span>Heading</span><span id="lblHeading">0°</span></label>
+          <input type="range" id="rngHeading" min="0" max="359" value="0" />
+        </div>
+        <div>
+          <label><span>Route progress</span><span id="lblProgress">0%</span></label>
+          <input type="range" id="rngProgress" min="0" max="100" value="0" />
+        </div>
+        <div class="status-log" id="statusLog">Ready.</div>
+      </div>
+    </details>
+  </section>
 </div>
 
 <script>
@@ -288,25 +275,26 @@ const canvas = document.getElementById("hudCanvas");
 const ctx = canvas.getContext("2d");
 
 let displayMode = 0; // 0 = Mode A (GTA Map), 1 = Mode B (Full-Screen Turn Arrow)
-let autoDrive = true;
+let autoDrive = false;
 let smoothedScale = 1.35;
 
 // Shared state matching the firmware's HudRuntimeState
 const state = {
   originLat: 42.3314,
   originLon: -83.0458,
-  playerX: 5,
-  playerY: -35,
-  headingDeg: 15,
-  speedMph: 38,
-  speedLimitMph: 40,
-  maneuverId: 7,
-  turnDistM: 482,
-  destDistM: 4988,
-  etaMinutes: 8,
-  streetName: "Woodward Ave",
-  nextWpIdx: 5,
-  closestRouteIdx: 1,
+  playerX: 0,
+  playerY: 0,
+  headingDeg: 0,
+  speedMph: 0,
+  speedLimitMph: 0,
+  maneuverId: 0,
+  turnDistM: 0,
+  destDistM: 0,
+  etaMinutes: 0,
+  streetName: "",
+  nextWpIdx: 0,
+  closestRouteIdx: 0,
+  gpsOrigin: false, // origin re-anchored to the first GPS fix when there's no route
   routePts: [],
   ways: [],          // { tier, pts: [{x,y}] } in session meters (for the simulator)
   tileRuns: new Map(), // "tx,ty" -> [{ tier, ll: [[lat,lon],...] }] (for streaming to the HUD)
@@ -577,13 +565,13 @@ const ARROW_PATHS = {
   5: [[0.55, 0], [-0.22, 180], [0.30, 0]], // U-turn (left)
   1: [[1.0, 0]]                            // straight
 };
-function drawManeuverArrow(cx, cy, size, id, col, bg) {
+function drawManeuverArrow(cx, cy, size, id, col, bg, c = fx) {
   if (id === 9) { // arrive: map pin with a hole
     const r = size * 0.28, py = cy - size * 0.12;
-    fx.fillStyle = col;
-    fx.beginPath(); fx.arc(cx, py, r, 0, Math.PI * 2); fx.fill();
-    fx.beginPath(); fx.moveTo(cx - r * 0.81, py + r * 0.59); fx.lineTo(cx + r * 0.81, py + r * 0.59); fx.lineTo(cx, py + r * 2.1); fx.fill();
-    fx.fillStyle = bg; fx.beginPath(); fx.arc(cx, py, r * 0.4, 0, Math.PI * 2); fx.fill();
+    c.fillStyle = col;
+    c.beginPath(); c.arc(cx, py, r, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.moveTo(cx - r * 0.81, py + r * 0.59); c.lineTo(cx + r * 0.81, py + r * 0.59); c.lineTo(cx, py + r * 2.1); c.fill();
+    c.fillStyle = bg; c.beginPath(); c.arc(cx, py, r * 0.4, 0, Math.PI * 2); c.fill();
     return;
   }
   const mirror = id === 2 || id === 3 || id === 4;
@@ -605,16 +593,16 @@ function drawManeuverArrow(cx, cy, size, id, col, bg) {
   const sc = size / Math.max(x1 - x0, y1 - y0, 1e-3);
   const ox = cx - ((x0 + x1) / 2) * sc, oy = cy - ((y0 + y1) / 2) * sc;
   const S = ([px, py]) => [ox + px * sc, oy + py * sc];
-  fx.strokeStyle = col; fx.fillStyle = col; fx.lineCap = "round";
+  c.strokeStyle = col; c.fillStyle = col; c.lineCap = "round";
   for (let i = 0; i < pts.length - 1; i++) {
     const t = (i + 0.5) / (pts.length - 1);
-    fx.lineWidth = Math.max(2, (0.07 + 0.15 * t) * sc);
+    c.lineWidth = Math.max(2, (0.07 + 0.15 * t) * sc);
     const [ax, ay] = S(pts[i]), [bx, by] = S(pts[i + 1]);
-    fx.beginPath(); fx.moveTo(ax, ay); fx.lineTo(bx, by); fx.stroke();
+    c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
   }
   const tip = S([tx + ch * HL, ty + sh * HL]), lw = S([tx - sh * HW, ty + ch * HW]);
   const rw = S([tx + sh * HW, ty - ch * HW]), nt = S([tx + ch * HL * NOTCH, ty + sh * HL * NOTCH]);
-  fx.beginPath(); fx.moveTo(...tip); fx.lineTo(...lw); fx.lineTo(...nt); fx.lineTo(...rw); fx.closePath(); fx.fill();
+  c.beginPath(); c.moveTo(...tip); c.lineTo(...lw); c.lineTo(...nt); c.lineTo(...rw); c.closePath(); c.fill();
 }
 
 function drawLinkDot(x, y, r) {
@@ -709,7 +697,7 @@ function miniSpeedo(cx, cy, r) {
 
 function renderModeA(dt) {
   const th = theme();
-  const baseScale = computeZoomScale(state.speedMph, state.turnDistM, dt);
+  const baseScale = currentBaseScale;
   const scale = baseScale * L.zoomMult;
   const rad = (state.headingDeg * Math.PI) / 180.0;
   const widthBoost = Math.min(2.15, Math.max(0.85, Math.pow(1.1 / baseScale, 0.55))) * L.roadWidthMult;
@@ -863,18 +851,23 @@ let lastFrameTs = performance.now();
 function renderLoop(ts) {
   const dt = Math.min(0.1, Math.max(0, (ts - lastFrameTs) / 1000));
   lastFrameTs = ts;
+  currentBaseScale = computeZoomScale(state.speedMph, state.turnDistM, dt);
   updateSimulation(dt);
-  fx.save();
-  if (displayMode === 0) renderModeA(dt);
-  else renderModeB();
-  fx.restore();
-  ctx.save();
-  if (hudMode) { // HUD mode is mirrored for windshield reflection, like the panel's MADCTL flip
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
+  renderRadar();
+  renderStatusUi();
+  if (document.getElementById("devPanel").open) {
+    fx.save();
+    if (displayMode === 0) renderModeA(dt);
+    else renderModeB();
+    fx.restore();
+    ctx.save();
+    if (hudMode) { // HUD mode is mirrored for windshield reflection, like the panel's MADCTL flip
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(frameCanvas, 0, 0);
+    ctx.restore();
   }
-  ctx.drawImage(frameCanvas, 0, 0);
-  ctx.restore();
   requestAnimationFrame(renderLoop);
 }
 requestAnimationFrame(renderLoop);
@@ -903,7 +896,7 @@ function toggleHudMode() {
 
 function pauseAutoDrive() {
   autoDrive = false;
-  document.getElementById("btnSimDrive").textContent = "Resume Auto-Drive";
+  updatePauseBtn();
 }
 
 canvas.addEventListener("click", (e) => {
@@ -925,9 +918,11 @@ document.getElementById("selDisplay").addEventListener("change", (e) => setLayou
 setLayout(document.getElementById("selDisplay").value);
 updateBadge();
 
-document.getElementById("btnSimDrive").addEventListener("click", (e) => {
+document.getElementById("btnSimDrive").addEventListener("click", () => setSimulating(!simulating));
+document.getElementById("btnSimPause").addEventListener("click", () => {
+  if (!simulating) return;
   autoDrive = !autoDrive;
-  e.target.textContent = autoDrive ? "Pause Auto-Drive" : "Resume Auto-Drive";
+  updatePauseBtn();
 });
 
 document.getElementById("rngSpeed").addEventListener("input", (e) => {
@@ -996,18 +991,6 @@ async function resolveLocationInput(rawText, isSource) {
   };
 }
 
-document.getElementById("btnUseCurrentLoc").addEventListener("click", async () => {
-  try {
-    logMsg("Requesting browser/iPhone GPS location...");
-    const coords = await acquireCurrentGps();
-    document.getElementById("inpStart").value = "Current Location";
-    document.getElementById("lblSourceCoords").textContent = `${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}`;
-    logMsg(`Current location set: (${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)})`);
-  } catch (err) {
-    logMsg(`GPS error: ${err.message}`);
-  }
-});
-
 function startGpsTracking() {
   if (gpsWatchId !== null) return;
   if (!("geolocation" in navigator)) {
@@ -1017,14 +1000,21 @@ function startGpsTracking() {
   pauseAutoDrive();
   const btn = document.getElementById("btnLiveGpsTrack");
   btn.classList.add("active");
-  btn.textContent = "Live GPS Tracking: ON";
+  btn.textContent = "Live GPS: On";
   logMsg("Live GPS tracking active.");
 
   gpsWatchId = navigator.geolocation.watchPosition(
     (pos) => {
       const { latitude, longitude, speed, heading } = pos.coords;
       currentGpsCoords = { lat: latitude, lon: longitude, speedMps: speed, heading };
-      document.getElementById("lblSourceCoords").textContent = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+      if (!state.hasRealRoute && !state.gpsOrigin) { // no route yet: center the map on the vehicle
+        state.originLat = latitude;
+        state.originLon = longitude;
+        state.gpsOrigin = true;
+        state.ways = [];
+        state.tileRuns = new Map();
+        roads.center = null;
+      }
       state.playerX = (longitude - state.originLon) * mPerDegLonAt(state.originLat);
       state.playerY = (latitude - state.originLat) * M_PER_DEG_LAT;
       locateOnRoute(state.playerX, state.playerY);
@@ -1051,8 +1041,8 @@ function stopGpsTracking() {
   gpsWatchId = null;
   const btn = document.getElementById("btnLiveGpsTrack");
   btn.classList.remove("active");
-  btn.textContent = "Live GPS Tracking: Off";
-  logMsg("Stopped live GPS tracking (simulator resumes).");
+  btn.textContent = "Live GPS: Off";
+  logMsg("Stopped live GPS tracking.");
 }
 
 document.getElementById("btnLiveGpsTrack").addEventListener("click", () => {
@@ -1208,7 +1198,7 @@ function buildTilePayload(tx, ty) {
 }
 
 async function ensureRoadsAround(lat, lon) {
-  if (!state.hasRealRoute || roads.inflight) return;
+  if (!(state.hasRealRoute || gpsWatchId !== null) || roads.inflight) return;
   if (roads.center) {
     const dx = (lon - roads.center.lon) * mPerDegLonAt(lat), dy = (lat - roads.center.lat) * M_PER_DEG_LAT;
     if (Math.hypot(dx, dy) < 1200) return;
@@ -1275,11 +1265,10 @@ function writeWithResponse(ch, data) {
   return typeof ch.writeValueWithResponse === "function" ? ch.writeValueWithResponse(data) : ch.writeValue(data);
 }
 
-// What reaches the HUD: real trips, live GPS, or the simulator only when "Demo → HUD" is on.
+// What reaches the HUD: real trips and live GPS, or the simulator while "Simulate drive" is on.
 // Otherwise a zeroed keep-alive keeps the link dot green while the HUD shows "No route".
-let demoToHud = false;
-const hudFeedActive = () => state.hasRealRoute || demoToHud || gpsWatchId !== null;
-const hudRouteActive = () => state.hasRealRoute || demoToHud;
+const hudFeedActive = () => state.hasRealRoute || simulating || gpsWatchId !== null;
+const hudRouteActive = () => state.hasRealRoute || simulating;
 
 function sendTelemetry() {
   if (!ble.connected || ble.telPending) return;
@@ -1384,7 +1373,7 @@ function sendRouteOverBle() {
 
 // Keeps the 3x3 tile neighbourhood around the player on the HUD (fits the C6's 12-tile LRU)
 function sendTilesAroundPlayer(lat, lon) {
-  if (!ble.connected || !state.tileRuns.size || !hudRouteActive()) return;
+  if (!ble.connected || !state.tileRuns.size || !hudFeedActive()) return;
   const tx = tileXOf(lon), ty = tileYOf(lat);
   const key = tileKey(tx, ty);
   if (key === ble.lastTileKey) return;
@@ -1412,7 +1401,7 @@ function sendTilesAroundPlayer(lat, lon) {
 // 0 = unknown, which hides the red limit tick on the HUD speedometer.
 let lastLimitMs = 0;
 function updateSpeedLimitFromRoads() {
-  if (!state.hasRealRoute || Date.now() - lastLimitMs < 1000) return;
+  if (!(state.hasRealRoute || gpsWatchId !== null) || Date.now() - lastLimitMs < 1000) return;
   lastLimitMs = Date.now();
   const px = state.playerX, py = state.playerY;
   let best = { d2: 30 * 30, limit: 0 }; // only roads within 30 m count
@@ -1441,14 +1430,6 @@ setInterval(() => {
   sendTilesAroundPlayer(lat, lon);
 }, TELEMETRY_PERIOD_MS);
 
-document.getElementById("btnDemoToHud").addEventListener("click", (e) => {
-  demoToHud = !demoToHud;
-  e.target.textContent = `Demo → HUD: ${demoToHud ? "On" : "Off"}`;
-  e.target.classList.toggle("active", demoToHud);
-  ble.lastTileKey = null;
-  sendRouteOverBle();
-});
-
 async function connectGatt() {
   const server = await ble.device.gatt.connect();
   const service = await server.getPrimaryService(SERVICE_UUID);
@@ -1458,8 +1439,7 @@ async function connectGatt() {
   ble.reconnectTries = 0;
   ble.queue = Promise.resolve();
   ble.telPending = false;
-  document.getElementById("btnConnectBle").textContent = "HUD Connected";
-  document.getElementById("btnConnectBle").classList.add("active");
+  updateLinkUi();
   logMsg(`Connected to ${ble.device.name || "GTA-HUD"} over WebBLE.`);
   sendRouteOverBle();
 }
@@ -1467,8 +1447,7 @@ async function connectGatt() {
 function onGattDisconnected() {
   ble.connected = false;
   ble.tel = ble.geo = null;
-  document.getElementById("btnConnectBle").textContent = "Connect HUD (BLE)";
-  document.getElementById("btnConnectBle").classList.remove("active");
+  updateLinkUi();
   if (ble.reconnectTries >= 5) {
     logMsg("HUD disconnected. Tap Connect to retry.");
     return;
@@ -1514,7 +1493,7 @@ async function connectHud() {
   }
 }
 
-document.getElementById("btnConnectBle").addEventListener("click", async () => {
+async function onConnectTap() {
   const pending = connectHud(); // first thing in the tap handler (user-activation rules)
   if ("wakeLock" in navigator) navigator.wakeLock.request("screen").catch(() => {});
   try {
@@ -1524,7 +1503,9 @@ document.getElementById("btnConnectBle").addEventListener("click", async () => {
     logMsg(msg);
     window.alert(`${msg}\n\nMake sure the HUD is powered, nothing else (e.g. a Chrome tab on the Mac) is connected to it, and Bluetooth is allowed for Bluefy in iOS Settings.`);
   }
-});
+}
+document.getElementById("btnConnectBle").addEventListener("click", onConnectTap);
+document.getElementById("linkPill").addEventListener("click", onConnectTap);
 
 // ============================================================================
 // Trips: shared Maps links / addresses -> destination (+ stops) -> route
@@ -1571,8 +1552,10 @@ function parseGoParams(params) {
   const via = (params.get("via") || "").split("|").map((v) => tripPlace(v)).filter(Boolean);
   const dest = tripPlace(params.get("dest"), params.get("name") || "");
   if (dest) return { dest, via };
-  const share = params.get("share");
+  let share = params.get("share");
   if (!share) return null;
+  // A lone link with raw spaces (not every share path encodes them) is still one link
+  if (/^https?:\/\//i.test(share.trim()) && !share.includes("\n")) share = share.trim().replace(/ /g, "%20");
   const t = parseTripInput(share);
   if (t && params.get("name") && !t.dest.name) t.dest.name = params.get("name");
   return t;
@@ -1721,39 +1704,48 @@ function placeLabel(p) {
   return p.name || p.query || `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
 }
 
-function showTripSheet(trip, resume) {
-  pendingTrip = trip;
-  document.getElementById("tripTitle").textContent = `${resume ? "Resume trip to" : "Navigate to"} ${placeLabel(trip.dest)}`;
-  document.getElementById("tripSub").textContent = trip.via.length
-    ? `via ${trip.via.map(placeLabel).join(" → ")}`
-    : "Tap Start: connects the HUD, gets your GPS position and routes from where you are.";
-  document.getElementById("tripSheet").hidden = false;
-}
-
-function hideTripSheet() {
-  document.getElementById("tripSheet").hidden = true;
-}
-
 async function startTrip(parsed) {
   // Bluetooth first: requestDevice() is only allowed directly after the user's tap
   const pending = ble.connected ? Promise.resolve() : connectHud();
-  hideTripSheet();
   if ("wakeLock" in navigator) navigator.wakeLock.request("screen").catch(() => {});
-  await pending.catch((err) => logMsg(`Bluetooth connect failed: ${errText(err)} (route continues; tap Connect HUD to retry)`));
+  const cta = document.getElementById("btnStart");
+  cta.disabled = true;
+  cta.textContent = "Starting…";
+  await pending.catch((err) => {
+    logMsg(`Bluetooth connect failed: ${errText(err)} (route continues; tap the Bluetooth button to retry)`);
+    setHint("HUD not connected. The route still works; tap the Bluetooth button to connect.");
+  });
   try {
-    logMsg("Getting GPS position...");
-    const here = await acquireCurrentGps();
+    // "From" defaults to the vehicle's GPS position; any typed address is used instead (desk testing)
+    const fromText = document.getElementById("inpStart").value.trim();
+    const useGps = !fromText || /^current\s*location$/i.test(fromText);
+    let src;
+    if (useGps) {
+      logMsg("Getting GPS position...");
+      const here = await acquireCurrentGps();
+      src = { lat: here.lat, lon: here.lon, label: "Current location" };
+    } else {
+      src = await resolveLocationInput(fromText, true);
+    }
     const dest = await resolveTripPlace(parsed.dest);
     const via = [];
     for (const v of parsed.via || []) via.push({ ...(await resolveTripPlace(v)), passed: false });
     activeTrip = { dest, via, startedAt: Date.now(), arrived: false };
+    pendingTrip = null;
+    resumeTrip = null;
     saveTrip();
-    document.getElementById("inpStart").value = "Current Location";
+    addRecent(dest);
     document.getElementById("inpDest").value = dest.label;
-    await planRoute({ lat: here.lat, lon: here.lon, label: "Current Location" }, via, dest);
-    startGpsTracking();
+    await planRoute(src, via, dest);
+    if (!simulating) startGpsTracking();
   } catch (err) {
     logMsg(`Trip error: ${err.message}`);
+    setHint(`Couldn't start: ${err.message}`);
+    activeTrip = null;
+  } finally {
+    cta.disabled = false;
+    lastUi = "";
+    updateSheet();
   }
 }
 
@@ -1813,16 +1805,17 @@ function checkIncomingTrip() {
   const t = tripFromLocation();
   if (t && t.dest) {
     history.replaceState(null, "", location.pathname); // don't re-trigger on reload; resume covers that
-    showTripSheet(t, false);
+    setPendingTrip(t);
     return;
   }
   const saved = loadSavedTrip();
-  if (saved) showTripSheet(saved, true);
+  if (saved) {
+    resumeTrip = saved;
+    renderRecents();
+  }
 }
 
 window.addEventListener("hashchange", checkIncomingTrip);
-document.getElementById("btnTripStart").addEventListener("click", () => { if (pendingTrip) startTrip(pendingTrip); });
-document.getElementById("btnTripDismiss").addEventListener("click", () => { hideTripSheet(); pendingTrip = null; });
 
 document.getElementById("btnPasteTrip").addEventListener("click", async () => {
   let text = "";
@@ -1833,7 +1826,7 @@ document.getElementById("btnPasteTrip").addEventListener("click", async () => {
   }
   const t = parseTripInput(text);
   if (t && t.dest) {
-    showTripSheet(t, false);
+    setPendingTrip(t);
     return;
   }
   const shortLink = /maps\.apple\/p\/|maps\.app\.goo\.gl|goo\.gl\/maps/i.test(text);
@@ -1911,8 +1904,9 @@ async function planRoute(src, via, dest, opts = {}) {
     roads.center = null;
   }
   nav.progressM = 0;
-  autoDrive = gpsWatchId === null;
-  document.getElementById("btnSimDrive").textContent = autoDrive ? "Pause Auto-Drive" : "Resume Auto-Drive";
+  state.gpsOrigin = true;
+  autoDrive = simulating;
+  updatePauseBtn();
   if (gpsWatchId !== null && currentGpsCoords) {
     state.playerX = (currentGpsCoords.lon - oLon) * mLon;
     state.playerY = (currentGpsCoords.lat - oLat) * M_PER_DEG_LAT;
@@ -1926,33 +1920,347 @@ async function planRoute(src, via, dest, opts = {}) {
   if (!keepOrigin) await ensureRoadsAround(src.lat, src.lon);
 }
 
-// Manual entry: source box + destination box (accepts addresses, lat,lon or pasted Maps links)
-document.getElementById("btnFetchReal").addEventListener("click", async () => {
-  try {
-    const srcInfo = await resolveLocationInput(document.getElementById("inpStart").value, true);
-    document.getElementById("lblSourceCoords").textContent = `${srcInfo.lat.toFixed(4)}, ${srcInfo.lon.toFixed(4)}`;
-    const parsed = parseTripInput(document.getElementById("inpDest").value);
-    if (!parsed || !parsed.dest) throw new Error("Please enter a Destination");
-    const dest = await resolveTripPlace(parsed.dest);
-    const via = [];
-    for (const v of parsed.via) via.push({ ...(await resolveTripPlace(v)), passed: false });
-    document.getElementById("lblDestCoords").textContent = `${dest.lat.toFixed(4)}, ${dest.lon.toFixed(4)}`;
-    activeTrip = { dest, via, startedAt: Date.now(), arrived: false };
-    saveTrip();
-    await planRoute(srcInfo, via, dest);
-  } catch (err) {
-    logMsg(`Route error: ${err.message}`);
-  }
-});
-
 // Installable app (Android share target); network-first so updates show up immediately
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
-buildDemoGrid();
-loadDemoRoute();
+// ============================================================================
+// App UI: radar, turn card, "Where to?" sheet, recent places, developer options
+// ============================================================================
+let simulating = false;      // developer: simulated drive (also fed to the HUD)
+let currentBaseScale = 1.35; // smoothed m/px shared by the radar and the HUD preview
+let resumeTrip = null;
+let lastUi = "";
+
+const radarCanvas = document.getElementById("radar");
+const rc = radarCanvas.getContext("2d");
+let radarCss = 280, radarDpr = 1;
+
+function sizeRadar() {
+  radarCss = radarCanvas.clientWidth || 280;
+  radarDpr = Math.min(3, window.devicePixelRatio || 1);
+  radarCanvas.width = Math.round(radarCss * radarDpr);
+  radarCanvas.height = Math.round(radarCss * radarDpr);
+}
+window.addEventListener("resize", sizeRadar);
+
+function wayBounds(w) {
+  if (!w.bb) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of w.pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+    w.bb = [x0, y0, x1, y1];
+  }
+  return w.bb;
+}
+
+// GTA-style circular radar: map rotates with heading, player in the centre, N on the rim
+function renderRadar() {
+  const S = radarCss, cx = S / 2, cy = S / 2, R = S / 2 - 6, g = rc;
+  g.setTransform(radarDpr, 0, 0, radarDpr, 0, 0);
+  g.clearRect(0, 0, S, S);
+  g.save();
+  g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.clip();
+  g.fillStyle = "#0e1116"; g.fillRect(0, 0, S, S);
+  const rad = (state.headingDeg * Math.PI) / 180;
+
+  if (simulating || state.hasRealRoute || currentGpsCoords) {
+    const mPerPx = currentBaseScale * 0.9;
+    const cosH = Math.cos(rad) / mPerPx, sinH = Math.sin(rad) / mPerPx;
+    const px = state.playerX, py = state.playerY, reach = R * mPerPx * 1.05;
+    const P = (wx, wy) => { const dx = wx - px, dy = wy - py; return [cx + (dx * cosH - dy * sinH), cy - (dx * sinH + dy * cosH)]; };
+    const boost = Math.min(1.8, Math.max(0.8, Math.pow(1.1 / currentBaseScale, 0.5)));
+    const stroke = (pts) => {
+      g.beginPath();
+      pts.forEach((pt, i) => { const [x, y] = P(pt.x, pt.y); if (i) g.lineTo(x, y); else g.moveTo(x, y); });
+      g.stroke();
+    };
+    g.lineCap = "round"; g.lineJoin = "round";
+    const visible = state.ways.filter((w) => {
+      if (w.pts.length < 2) return false;
+      const [x0, y0, x1, y1] = wayBounds(w);
+      return x1 > px - reach && x0 < px + reach && y1 > py - reach && y0 < py + reach;
+    });
+    for (const w of visible) {
+      if (w.tier < 2) continue;
+      g.strokeStyle = "#07080b"; g.lineWidth = (w.tier === 3 ? 9 : 7) * boost; stroke(w.pts);
+    }
+    for (const w of visible) {
+      g.strokeStyle = w.tier === 3 ? "#9ba3b5" : (w.tier === 2 ? "#6b7383" : "#363b46");
+      g.lineWidth = (w.tier === 3 ? 6 : (w.tier === 2 ? 4.5 : 2.6)) * boost;
+      stroke(w.pts);
+    }
+    if (state.routePts.length >= 2) {
+      const route = [{ x: px, y: py }, ...state.routePts.slice(state.closestRouteIdx)];
+      g.strokeStyle = "#000"; g.lineWidth = 9 * boost; stroke(route);
+      g.strokeStyle = "#FFB800"; g.lineWidth = 5 * boost; stroke(route);
+      const edge = ([x, y]) => {
+        const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy), m = R - 15;
+        return d > m ? [cx + (dx * m) / d, cy + (dy * m) / d] : [x, y];
+      };
+      const last = state.routePts.length - 1;
+      if (state.nextWpIdx < last) {
+        const [x, y] = edge(P(state.routePts[state.nextWpIdx].x, state.routePts[state.nextWpIdx].y));
+        g.fillStyle = "#000"; g.fillRect(x - 8, y - 8, 16, 16);
+        g.fillStyle = "#E52521"; g.fillRect(x - 6, y - 6, 12, 12);
+        g.fillStyle = "#FFD700"; g.fillRect(x - 3, y - 3, 6, 6);
+      }
+      const [dx, dy] = edge(P(state.routePts[last].x, state.routePts[last].y));
+      for (const [r, c] of [[10, "#000"], [8, "#FFB800"], [6, "#000"], [4, "#FFB800"]]) {
+        g.fillStyle = c; g.beginPath(); g.arc(dx, dy, r, 0, Math.PI * 2); g.fill();
+      }
+    }
+  } else {
+    // No position yet: subtle grid + hint
+    g.strokeStyle = "rgba(255,255,255,0.05)"; g.lineWidth = 1;
+    for (let i = -S; i < S * 2; i += 26) {
+      g.beginPath(); g.moveTo(i, 0); g.lineTo(i + S * 0.3, S); g.stroke();
+      g.beginPath(); g.moveTo(0, i); g.lineTo(S, i - S * 0.2); g.stroke();
+    }
+    g.fillStyle = "#8e929b"; g.font = `600 14px ${FONT}`; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(gpsWatchId !== null ? "Locating…" : "Your location appears here", cx, cy + 40);
+  }
+  const vg = g.createRadialGradient(cx, cy, R * 0.55, cx, cy, R);
+  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.55)");
+  g.fillStyle = vg; g.fillRect(0, 0, S, S);
+  g.restore();
+
+  // Rim, north marker, player arrow
+  g.lineWidth = 6; g.strokeStyle = "#FFB800"; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = 1.5; g.strokeStyle = "rgba(0,0,0,0.6)"; g.beginPath(); g.arc(cx, cy, R - 3.5, 0, Math.PI * 2); g.stroke();
+  const nx = cx - Math.sin(rad) * R, ny = cy - Math.cos(rad) * R;
+  g.fillStyle = "#000"; g.beginPath(); g.arc(nx, ny, 11, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.stroke();
+  g.fillStyle = "#fff"; g.font = `800 12px ${FONT}`; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText("N", nx, ny + 0.5);
+  g.fillStyle = "#000"; g.beginPath(); g.moveTo(cx, cy - 14); g.lineTo(cx - 11, cy + 11); g.lineTo(cx + 11, cy + 11); g.fill();
+  g.fillStyle = "#fff"; g.beginPath(); g.moveTo(cx, cy - 10); g.lineTo(cx - 7.5, cy + 7.5); g.lineTo(cx, cy + 3); g.lineTo(cx + 7.5, cy + 7.5); g.fill();
+}
+
+// Turn card + speed bubble; DOM only touched when something visible changed
+const turnIconCtx = document.getElementById("turnIcon").getContext("2d");
+function renderStatusUi() {
+  const navigating = !!(activeTrip && !activeTrip.arrived && state.routePts.length >= 2);
+  const mph = Math.round(state.speedMph), lim = state.speedLimitMph;
+  const key = [navigating, state.maneuverId, Math.round(state.turnDistM / 10), state.streetName, state.etaMinutes,
+               Math.round(state.destDistM / 160), mph, lim, activeTrip ? activeTrip.arrived : "-"].join("|");
+  if (key === lastUi) return;
+  lastUi = key;
+  document.getElementById("speedVal").textContent = mph;
+  document.getElementById("speedChip").classList.toggle("over", lim > 0 && mph > lim + 5);
+  const lc = document.getElementById("limitChip");
+  lc.hidden = !(lim > 0);
+  lc.textContent = lim > 0 ? lim : "";
+  document.getElementById("turnCard").hidden = !navigating;
+  if (navigating) {
+    document.getElementById("turnDist").textContent =
+      state.maneuverId === 9 && state.turnDistM < 30 ? "Arrived" : formatTurnDist(state.turnDistM, 50);
+    document.getElementById("turnStreet").textContent = state.streetName;
+    const [num, unit] = etaParts();
+    document.getElementById("etaMin").textContent = `${num} ${unit}`;
+    document.getElementById("etaDist").textContent = `${(state.destDistM / 1609.34).toFixed(1)} mi`;
+    turnIconCtx.setTransform(1, 0, 0, 1, 0, 0);
+    turnIconCtx.clearRect(0, 0, 104, 104);
+    drawManeuverArrow(52, 52, 64, state.maneuverId || 1, "#FFB800", "#000", turnIconCtx);
+  }
+  updateSheet();
+}
+
+// ---------- "Where to?" sheet ----------
+const RECENT_KEY = "gtaHudRecent";
+function loadRecents() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); } catch { return []; }
+}
+
+function addRecent(p) {
+  const list = loadRecents().filter((r) => r.label !== p.label);
+  list.unshift({ label: p.label, lat: p.lat, lon: p.lon });
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 6))); } catch { /* private mode */ }
+  renderRecents();
+}
+
+function renderRecents() {
+  const box = document.getElementById("recentChips");
+  box.textContent = "";
+  const items = [];
+  if (resumeTrip) items.push({ label: `Resume: ${placeLabel(resumeTrip.dest)}`, trip: resumeTrip, cls: "resume" });
+  for (const r of loadRecents()) {
+    if (resumeTrip && r.label === placeLabel(resumeTrip.dest)) continue; // already offered as "Resume"
+    items.push({ label: r.label, trip: { dest: { lat: r.lat, lon: r.lon, name: r.label }, via: [] } });
+  }
+  for (const it of items) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `chip ${it.cls || ""}`;
+    b.textContent = it.label;
+    b.addEventListener("click", () => setPendingTrip(it.trip));
+    box.appendChild(b);
+  }
+  const show = items.length > 0 && !activeTrip;
+  box.hidden = !show;
+  document.getElementById("recentLabel").hidden = !show;
+}
+
+function setHint(text) {
+  document.getElementById("hint").textContent = text;
+}
+
+function setPendingTrip(trip) {
+  pendingTrip = trip;
+  document.getElementById("inpDest").value = placeLabel(trip.dest);
+  document.getElementById("tripSub").textContent = trip.via.length ? `via ${trip.via.map(placeLabel).join(" → ")}` : "";
+  setHint("");
+  updateSheet();
+}
+
+function updateSheet() {
+  const navigating = !!(activeTrip && !activeTrip.arrived);
+  const arrived = !!(activeTrip && activeTrip.arrived);
+  const kicker = document.getElementById("sheetKicker");
+  const title = document.getElementById("sheetTitle");
+  const cta = document.getElementById("btnStart");
+  if (cta.disabled) return; // "Starting…"
+  if (navigating) {
+    kicker.textContent = "Navigating to";
+    title.textContent = activeTrip.dest.label;
+    cta.textContent = "End trip";
+  } else if (arrived) {
+    kicker.textContent = "You've arrived at";
+    title.textContent = activeTrip.dest.label;
+    cta.textContent = "Done";
+  } else {
+    kicker.textContent = pendingTrip ? "Ready to go" : "";
+    title.textContent = "Where to?";
+    cta.textContent = "Start";
+  }
+  cta.classList.toggle("dark", navigating || arrived);
+  document.querySelector(".sheet").classList.toggle("is-trip", navigating || arrived);
+  document.getElementById("inpDest").disabled = navigating;
+  document.getElementById("inpStart").disabled = navigating;
+  const showRecents = !activeTrip && document.getElementById("recentChips").childElementCount > 0;
+  document.getElementById("recentChips").hidden = !showRecents;
+  document.getElementById("recentLabel").hidden = !showRecents;
+}
+
+function endTrip() {
+  activeTrip = null;
+  pendingTrip = null;
+  clearSavedTrip();
+  state.hasRealRoute = false;
+  state.routePts = [];
+  nav.maneuvers = [];
+  nav.cum = [0];
+  nav.total = 0;
+  state.maneuverId = 0;
+  state.turnDistM = 0;
+  state.destDistM = 0;
+  state.etaMinutes = 0;
+  state.streetName = "";
+  document.getElementById("inpDest").value = "";
+  document.getElementById("tripSub").textContent = "";
+  sendClearRouteOverBle();
+  renderRecents();
+  lastUi = "";
+  updateSheet();
+  logMsg("Trip ended.");
+}
+
+document.getElementById("btnStart").addEventListener("click", () => {
+  if (activeTrip) { endTrip(); return; }
+  const typed = document.getElementById("inpDest").value.trim();
+  const trip = pendingTrip && typed === placeLabel(pendingTrip.dest) ? pendingTrip : (typed ? parseTripInput(typed) : null);
+  if (!trip || !trip.dest) {
+    setHint("Enter a destination, pick a recent place, or share one from Maps.");
+    document.getElementById("inpDest").focus();
+    return;
+  }
+  setHint("");
+  startTrip(trip);
+});
+
+document.getElementById("inpDest").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    document.getElementById("btnStart").click();
+  }
+});
+
+document.getElementById("inpDest").addEventListener("input", () => {
+  document.getElementById("tripSub").textContent = "";
+  if (pendingTrip) { pendingTrip = null; updateSheet(); }
+});
+
+function updateLinkUi() {
+  const on = ble.connected;
+  document.getElementById("linkDot").classList.toggle("on", on);
+  document.getElementById("btDot").classList.toggle("on", on);
+  document.getElementById("linkText").textContent = on ? "HUD connected" : "HUD not connected";
+}
+
+// ---------- developer options: simulated drive ----------
+function updatePauseBtn() {
+  const b = document.getElementById("btnSimPause");
+  b.textContent = autoDrive ? "⏸ Pause" : "▶ Resume";
+  b.disabled = !simulating;
+}
+
+function setSimulating(on) {
+  simulating = on;
+  const b = document.getElementById("btnSimDrive");
+  b.textContent = on ? "■ Stop simulation" : "▶ Simulate drive";
+  b.classList.toggle("active", on);
+  if (on) {
+    stopGpsTracking();
+    if (state.routePts.length < 2) {
+      buildDemoGrid();
+      loadDemoRoute();
+      state.speedLimitMph = 40;
+    }
+    state.speedMph = Number(document.getElementById("rngSpeed").value);
+    autoDrive = true;
+    logMsg("Simulating a drive (sent to the HUD while on).");
+  } else {
+    autoDrive = false;
+    if (!state.hasRealRoute) {
+      state.routePts = [];
+      nav.maneuvers = [];
+      nav.cum = [0];
+      nav.total = 0;
+      state.ways = [];
+      state.tileRuns = new Map();
+      state.maneuverId = 0;
+      state.turnDistM = 0;
+      state.destDistM = 0;
+      state.streetName = "";
+      state.speedMph = 0;
+      state.speedLimitMph = 0;
+      state.gpsOrigin = false;
+    }
+    logMsg("Simulation stopped; following the real vehicle.");
+    autoStartGps();
+  }
+  updatePauseBtn();
+  ble.lastTileKey = null;
+  lastUi = "";
+  sendRouteOverBle();
+}
+
+// GPS starts by itself when location access was already granted; otherwise with the first trip
+async function autoStartGps() {
+  if (gpsWatchId !== null || simulating || !("geolocation" in navigator)) return;
+  try {
+    const p = await navigator.permissions.query({ name: "geolocation" });
+    if (p.state === "granted") startGpsTracking();
+  } catch { /* Permissions API unavailable: GPS starts with the first trip */ }
+}
+
+sizeRadar();
+renderRecents();
+updateLinkUi();
+updatePauseBtn();
+updateSheet();
 checkIncomingTrip();
+autoStartGps();
 </script>
 </body>
 </html>
