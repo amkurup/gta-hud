@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#0b0d12" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
 <title>ESP32 GTA San Andreas HUD — WebBLE Companion & HUD Simulator</title>
 <style>
   :root {
@@ -149,6 +153,22 @@
     padding: 7px 10px;
     font-size: 12px;
   }
+  .trip-sheet {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 50;
+    background: #141821;
+    border-top: 2px solid var(--gold);
+    padding: 16px 18px 22px;
+    box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .trip-sheet[hidden] { display: none; }
+  .trip-title { font-size: 17px; font-weight: 700; }
+  .trip-sub { font-size: 13px; color: var(--muted); }
+  button.big { font-size: 18px; padding: 14px 22px; flex: 1; }
   .status-log {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px;
@@ -192,6 +212,7 @@
       <button id="btnSimDrive" class="primary">Pause Auto-Drive</button>
       <button id="btnToggleMode">Switch to Turn View</button>
       <button id="btnMirror">HUD Mode (bright + mirror)</button>
+      <button id="btnDemoToHud">Demo → HUD: Off</button>
     </div>
     <div>
       <label><span>Vehicle Speed (Finer Near-0 MPH Zoom)</span><span id="lblSpeed">38.0 mph · 1.92 m/px</span></label>
@@ -212,6 +233,7 @@
     <h2>2. Navigation Route & Bluefy WebBLE</h2>
     <div class="row">
       <button id="btnConnectBle" class="primary">Connect HUD (BLE)</button>
+      <button id="btnPasteTrip">Paste trip / Maps link</button>
       <button id="btnUseCurrentLoc">Use Current Location (GPS)</button>
       <button id="btnLiveGpsTrack">Live GPS Tracking: Off</button>
     </div>
@@ -228,7 +250,16 @@
         <button id="btnFetchReal" class="primary">Get Route & Roads</button>
       </div>
     </div>
-    <div class="status-log" id="statusLog">Ready. Enter a Source (or click Use Current Location) and a Destination.</div>
+    <div class="status-log" id="statusLog">Ready. Share a place from Apple/Google Maps ("Send to HUD"), tap Paste trip, or enter a destination (address, place, lat,lon or a Maps link).</div>
+  </div>
+</div>
+
+<div id="tripSheet" class="trip-sheet" hidden>
+  <div class="trip-title" id="tripTitle">Navigate</div>
+  <div class="trip-sub" id="tripSub"></div>
+  <div class="row">
+    <button id="btnTripStart" class="primary big">Start</button>
+    <button id="btnTripDismiss">Dismiss</button>
   </div>
 </div>
 
@@ -383,6 +414,7 @@ function locateOnRoute(x, y) {
   if (best.d2 > 80 * 80) best = search(0, pts.length - 1); // off-route or jumped: global search
   nav.segIdx = best.seg;
   nav.progressM = best.along;
+  nav.offRouteM = Math.sqrt(best.d2);
 }
 
 function updateNavDerivedState() {
@@ -975,22 +1007,16 @@ document.getElementById("btnUseCurrentLoc").addEventListener("click", async () =
   }
 });
 
-document.getElementById("btnLiveGpsTrack").addEventListener("click", (e) => {
-  if (gpsWatchId !== null) {
-    navigator.geolocation.clearWatch(gpsWatchId);
-    gpsWatchId = null;
-    e.target.classList.remove("active");
-    e.target.textContent = "Live GPS Tracking: Off";
-    logMsg("Stopped live GPS tracking (simulator resumes).");
-    return;
-  }
+function startGpsTracking() {
+  if (gpsWatchId !== null) return;
   if (!("geolocation" in navigator)) {
     logMsg("Geolocation not supported.");
     return;
   }
   pauseAutoDrive();
-  e.target.classList.add("active");
-  e.target.textContent = "Live GPS Tracking: ON";
+  const btn = document.getElementById("btnLiveGpsTrack");
+  btn.classList.add("active");
+  btn.textContent = "Live GPS Tracking: ON";
   logMsg("Live GPS tracking active.");
 
   gpsWatchId = navigator.geolocation.watchPosition(
@@ -1011,10 +1037,26 @@ document.getElementById("btnLiveGpsTrack").addEventListener("click", (e) => {
         document.getElementById("rngHeading").value = Math.round(heading);
         document.getElementById("lblHeading").textContent = `${Math.round(heading)}°`;
       }
+      onTripPosition(latitude, longitude);
     },
     (err) => logMsg(`GPS watch warning: ${err.message}`),
     { enableHighAccuracy: true, maximumAge: 1000 }
   );
+}
+
+function stopGpsTracking() {
+  if (gpsWatchId === null) return;
+  navigator.geolocation.clearWatch(gpsWatchId);
+  gpsWatchId = null;
+  const btn = document.getElementById("btnLiveGpsTrack");
+  btn.classList.remove("active");
+  btn.textContent = "Live GPS Tracking: Off";
+  logMsg("Stopped live GPS tracking (simulator resumes).");
+}
+
+document.getElementById("btnLiveGpsTrack").addEventListener("click", () => {
+  if (gpsWatchId !== null) stopGpsTracking();
+  else startGpsTracking();
 });
 
 // Current player position as WGS84 (GPS when tracking, otherwise derived from the simulator)
@@ -1232,8 +1274,21 @@ function writeWithResponse(ch, data) {
   return typeof ch.writeValueWithResponse === "function" ? ch.writeValueWithResponse(data) : ch.writeValue(data);
 }
 
+// What reaches the HUD: real trips, live GPS, or the simulator only when "Demo → HUD" is on.
+// Otherwise a zeroed keep-alive keeps the link dot green while the HUD shows "No route".
+let demoToHud = false;
+const hudFeedActive = () => state.hasRealRoute || demoToHud || gpsWatchId !== null;
+const hudRouteActive = () => state.hasRealRoute || demoToHud;
+
 function sendTelemetry() {
   if (!ble.connected || ble.telPending) return;
+  if (!hudFeedActive()) {
+    const idle = new Uint8Array(24);
+    idle[0] = PKT_TELEMETRY;
+    ble.telPending = true;
+    bleEnqueue(async () => { ble.telPending = false; if (ble.tel) await writeNoResponse(ble.tel, idle); });
+    return;
+  }
   const { lat, lon } = currentPlayerLatLon();
   const buf = new ArrayBuffer(24);
   const dv = new DataView(buf);
@@ -1289,8 +1344,25 @@ function sendChunkedPayload(payloadType, bytes) {
   return last;
 }
 
+// Empty route: the HUD drops back to its "No route" screen
+function sendClearRouteOverBle() {
+  if (!ble.connected) return;
+  const buf = new ArrayBuffer(10);
+  const dv = new DataView(buf);
+  dv.setInt32(0, Math.round(state.originLat * 1e7), true);
+  dv.setInt32(4, Math.round(state.originLon * 1e7), true);
+  dv.setUint16(8, 0, true);
+  sendChunkedPayload(PKT_ROUTE_POLYLINE, new Uint8Array(buf));
+  ble.sentTiles.clear();
+  ble.lastTileKey = null;
+}
+
 function sendRouteOverBle() {
   if (!ble.connected || state.routePts.length < 2) return;
+  if (!hudRouteActive()) {
+    sendClearRouteOverBle();
+    return;
+  }
   const n = state.routePts.length;
   const buf = new ArrayBuffer(10 + n * 4);
   const dv = new DataView(buf);
@@ -1311,7 +1383,7 @@ function sendRouteOverBle() {
 
 // Keeps the 3x3 tile neighbourhood around the player on the HUD (fits the C6's 12-tile LRU)
 function sendTilesAroundPlayer(lat, lon) {
-  if (!ble.connected || !state.tileRuns.size) return;
+  if (!ble.connected || !state.tileRuns.size || !hudRouteActive()) return;
   const tx = tileXOf(lon), ty = tileYOf(lat);
   const key = tileKey(tx, ty);
   if (key === ble.lastTileKey) return;
@@ -1364,9 +1436,17 @@ setInterval(() => {
   updateSpeedLimitFromRoads();
   if (!ble.connected) return;
   sendTelemetry();
-  sendStreetIfChanged(false);
+  if (hudFeedActive()) sendStreetIfChanged(false);
   sendTilesAroundPlayer(lat, lon);
 }, TELEMETRY_PERIOD_MS);
+
+document.getElementById("btnDemoToHud").addEventListener("click", (e) => {
+  demoToHud = !demoToHud;
+  e.target.textContent = `Demo → HUD: ${demoToHud ? "On" : "Off"}`;
+  e.target.classList.toggle("active", demoToHud);
+  ble.lastTileKey = null;
+  sendRouteOverBle();
+});
 
 async function connectGatt() {
   const server = await ble.device.gatt.connect();
@@ -1400,56 +1480,369 @@ function onGattDisconnected() {
   }), delayMs);
 }
 
-document.getElementById("btnConnectBle").addEventListener("click", async () => {
-  try {
-    if (!navigator.bluetooth) throw new Error("Web Bluetooth unavailable (use Chrome/Edge, or Bluefy on iOS)");
-    if ("wakeLock" in navigator) await navigator.wakeLock.request("screen").catch(() => {});
-    if (ble.device && ble.device.gatt.connected) return;
-    ble.device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+// Reuses a previously permitted HUD when the browser supports getDevices() (no picker);
+// otherwise shows the device picker, which must happen right after a user tap.
+async function connectHud() {
+  if (!navigator.bluetooth) throw new Error("Web Bluetooth unavailable (use Chrome/Edge, or Bluefy on iOS)");
+  if (ble.device && ble.device.gatt.connected) return;
+  if (!ble.device && typeof navigator.bluetooth.getDevices === "function") {
+    const known = (await navigator.bluetooth.getDevices().catch(() => [])).find((d) => d.name === "GTA-HUD");
+    if (known) ble.device = known;
+  }
+  if (!ble.device) ble.device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+  if (ble.listenerFor !== ble.device) {
     ble.device.addEventListener("gattserverdisconnected", onGattDisconnected);
-    ble.reconnectTries = 0;
+    ble.listenerFor = ble.device;
+  }
+  ble.reconnectTries = 0;
+  try {
     await connectGatt();
+  } catch (err) {
+    ble.device = null; // e.g. remembered HUD out of range: next tap shows the picker
+    throw err;
+  }
+}
+
+document.getElementById("btnConnectBle").addEventListener("click", async () => {
+  if ("wakeLock" in navigator) navigator.wakeLock.request("screen").catch(() => {});
+  try {
+    await connectHud();
   } catch (err) {
     logMsg(`BLE: ${err.message}`);
   }
 });
 
 // ============================================================================
-// Real route: Nominatim -> OSRM (turn-by-turn) -> simplified route + roads
+// Trips: shared Maps links / addresses -> destination (+ stops) -> route
 // ============================================================================
-document.getElementById("btnFetchReal").addEventListener("click", async () => {
+// <trip-parser>  (kept self-contained: tools/test_trip_links.js extracts and tests this block)
+function parseCoordPair(s) {
+  if (s == null) return null;
+  const m = String(s).trim().match(/^(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  if (!m) return null;
+  const lat = parseFloat(m[1]), lon = parseFloat(m[2]);
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
+}
+
+// A place is {lat, lon, name} or {query, name}; "Current/My Location" means "use GPS" (null)
+function tripPlace(value, name) {
+  if (value == null) return null;
+  const v = String(value).replace(/\+/g, " ").trim();
+  if (!v || /^(current|my)\s+location$/i.test(v)) return null;
+  const c = parseCoordPair(v);
+  if (c) return { ...c, name: name || "" };
+  return { query: v, name: name || v };
+}
+
+function decodeSeg(s) {
+  try { return decodeURIComponent(s.replace(/\+/g, " ")); } catch { return s; }
+}
+
+function parseGoParams(params) {
+  const via = (params.get("via") || "").split("|").map((v) => tripPlace(v)).filter(Boolean);
+  const dest = tripPlace(params.get("dest"), params.get("name") || "");
+  if (dest) return { dest, via };
+  const share = params.get("share");
+  if (!share) return null;
+  const t = parseTripInput(share);
+  if (t && params.get("name") && !t.dest.name) t.dest.name = params.get("name");
+  return t;
+}
+
+// Accepts whatever a share sheet / clipboard / AirDrop hands over: Apple Maps (unified iOS 18.4+
+// and legacy) URLs, Google Maps place/dir/search/@ URLs, Waze links, our own #go links,
+// "lat,lon", or plain text (name / address lines). Returns { dest, via[], source? } or null.
+function parseTripInput(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  const direct = parseCoordPair(text);
+  if (direct) return { dest: { ...direct, name: "" }, via: [] };
+
+  const urlMatch = text.match(/https?:\/\/[^\s<>"]+/i);
+  const otherLines = text.split(/\n+/).map((l) => l.trim()).filter((l) => l && !/https?:\/\//i.test(l));
+  const textFallback = () => otherLines.length
+    ? { dest: { query: otherLines.slice(0, 2).join(", "), name: otherLines[0] }, via: [] }
+    : null;
+  if (!urlMatch) return { dest: { query: otherLines.join(", "), name: otherLines[0] }, via: [] };
+
+  let u;
+  try { u = new URL(urlMatch[0]); } catch { return textFallback(); }
+  const host = u.hostname.replace(/^www\./, "").toLowerCase();
+  const p = u.searchParams;
+  const path = u.pathname;
+
+  // Our own trip links (e.g. pasted from the "Send to HUD" Shortcut)
+  if (u.hash.startsWith("#go?")) return parseGoParams(new URLSearchParams(u.hash.slice(4)));
+
+  // Apple Maps
+  if (host === "maps.apple.com" || host === "maps.apple" || host.endsWith(".maps.apple.com")) {
+    const name = p.get("name") || p.get("q") || "";
+    const dst = p.get("destination") || p.get("daddr");
+    if (dst) {
+      return {
+        dest: tripPlace(dst, ""),
+        via: p.getAll("waypoint").map((w) => tripPlace(w)).filter(Boolean),
+        source: tripPlace(p.get("source") || p.get("saddr"))
+      };
+    }
+    const coord = parseCoordPair(p.get("coordinate") || p.get("ll") || "");
+    if (coord) return { dest: { ...coord, name }, via: [] };
+    const q = p.get("address") || p.get("query") || p.get("q");
+    if (q) return { dest: tripPlace(q, name || q), via: [] };
+    return textFallback(); // e.g. an unexpanded maps.apple/p/... short link
+  }
+
+  // Google Maps
+  const isGoogle = (/(^|\.)google\.[a-z.]+$/.test(host) && path.startsWith("/maps")) || host.startsWith("maps.google.");
+  if (isGoogle) {
+    if (p.has("destination")) {
+      return {
+        dest: tripPlace(p.get("destination")),
+        via: (p.get("waypoints") || "").split("|").map((w) => tripPlace(w)).filter(Boolean),
+        source: tripPlace(p.get("origin"))
+      };
+    }
+    const parts = path.split("/");
+    const stop = (s) => s.startsWith("@") || s.startsWith("data=") || s === "am=t";
+    const di = parts.indexOf("dir");
+    if (di >= 0) {
+      const list = [];
+      for (const s of parts.slice(di + 1)) { if (stop(s)) break; list.push(decodeSeg(s)); }
+      while (list.length && !list[list.length - 1]) list.pop();
+      if (list.length) {
+        const places = list.map((s) => tripPlace(s));
+        return {
+          dest: places[places.length - 1],
+          via: places.slice(1, -1).filter(Boolean),
+          source: list.length > 1 ? places[0] : null
+        };
+      }
+    }
+    const pinned = path.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/) || u.href.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
+    const at = path.match(/\/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+    const pi = parts.indexOf("place");
+    const placeName = pi >= 0 && parts[pi + 1] ? decodeSeg(parts[pi + 1]) : "";
+    if (pinned) return { dest: { lat: parseFloat(pinned[1]), lon: parseFloat(pinned[2]), name: placeName }, via: [] };
+    if (placeName) {
+      const asCoord = parseCoordPair(placeName);
+      if (asCoord) return { dest: { ...asCoord, name: "" }, via: [] };
+      if (at) return { dest: { lat: parseFloat(at[1]), lon: parseFloat(at[2]), name: placeName }, via: [] };
+      return { dest: tripPlace(placeName), via: [] };
+    }
+    const si = parts.indexOf("search");
+    const q = p.get("query") || p.get("q") || p.get("daddr") || (si >= 0 && parts[si + 1] ? decodeSeg(parts[si + 1]) : "");
+    if (q) return { dest: tripPlace(q), via: [] };
+    const ll = parseCoordPair(p.get("ll") || "");
+    if (ll) return { dest: { ...ll, name: "" }, via: [] };
+    if (at) return { dest: { lat: parseFloat(at[1]), lon: parseFloat(at[2]), name: "" }, via: [] };
+    return textFallback();
+  }
+
+  // Waze
+  if (host === "waze.com" || host.endsWith(".waze.com")) {
+    const ll = parseCoordPair(p.get("ll") || "");
+    if (ll) return { dest: { ...ll, name: "" }, via: [] };
+    if (p.get("q")) return { dest: tripPlace(p.get("q")), via: [] };
+  }
+
+  // Unexpanded short links (maps.app.goo.gl, maps.apple/p, ...) or unknown sites: use the text
+  return textFallback();
+}
+// </trip-parser>
+
+async function resolveTripPlace(place) {
+  if (place.lat != null) {
+    return { lat: place.lat, lon: place.lon, label: place.name || `${place.lat.toFixed(4)}, ${place.lon.toFixed(4)}` };
+  }
+  const r = await resolveLocationInput(place.query, false);
+  return { lat: r.lat, lon: r.lon, label: place.name || r.label };
+}
+
+function distM(a, b) {
+  return Math.hypot((b.lon - a.lon) * mPerDegLonAt(a.lat), (b.lat - a.lat) * M_PER_DEG_LAT);
+}
+
+const TRIP_KEY = "gtaHudTrip";
+const TRIP_MAX_AGE_MS = 12 * 3600 * 1000;
+let pendingTrip = null; // parsed, not yet started
+let activeTrip = null;  // { dest:{lat,lon,label}, via:[{lat,lon,label,passed}], startedAt, arrived }
+const tripState = { offSince: 0, lastRerouteMs: 0, rerouting: false };
+
+function saveTrip() {
+  if (!activeTrip) return;
+  try { localStorage.setItem(TRIP_KEY, JSON.stringify(activeTrip)); } catch { /* private mode */ }
+}
+
+function clearSavedTrip() {
+  try { localStorage.removeItem(TRIP_KEY); } catch { /* ignore */ }
+}
+
+function loadSavedTrip() {
   try {
-    const srcInfo = await resolveLocationInput(document.getElementById("inpStart").value, true);
-    document.getElementById("lblSourceCoords").textContent = `${srcInfo.lat.toFixed(4)}, ${srcInfo.lon.toFixed(4)}`;
-    const dstInfo = await resolveLocationInput(document.getElementById("inpDest").value, false);
-    document.getElementById("lblDestCoords").textContent = `${dstInfo.lat.toFixed(4)}, ${dstInfo.lon.toFixed(4)}`;
-    const sLat = srcInfo.lat, sLon = srcInfo.lon;
-    logMsg(`Routing "${srcInfo.label}" -> "${dstInfo.label}"...`);
+    const t = JSON.parse(localStorage.getItem(TRIP_KEY) || "null");
+    if (!t || t.arrived || Date.now() - t.startedAt > TRIP_MAX_AGE_MS) return null;
+    return {
+      dest: { lat: t.dest.lat, lon: t.dest.lon, name: t.dest.label },
+      via: t.via.filter((v) => !v.passed).map((v) => ({ lat: v.lat, lon: v.lon, name: v.label }))
+    };
+  } catch { return null; }
+}
 
-    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${sLon},${sLat};${dstInfo.lon},${dstInfo.lat}?overview=full&geometries=geojson&steps=true`;
-    const res = await fetch(osrmUrl);
-    const data = await res.json();
-    if (!data.routes || !data.routes.length) throw new Error("No driving route found");
-    const route = data.routes[0];
+function placeLabel(p) {
+  return p.name || p.query || `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
+}
 
-    state.originLat = sLat;
-    state.originLon = sLon;
-    const mLon = mPerDegLonAt(sLat);
-    const fullPts = route.geometry.coordinates.map(([lon, lat]) => ({
-      x: (lon - sLon) * mLon,
-      y: (lat - sLat) * M_PER_DEG_LAT
-    }));
+function showTripSheet(trip, resume) {
+  pendingTrip = trip;
+  document.getElementById("tripTitle").textContent = `${resume ? "Resume trip to" : "Navigate to"} ${placeLabel(trip.dest)}`;
+  document.getElementById("tripSub").textContent = trip.via.length
+    ? `via ${trip.via.map(placeLabel).join(" → ")}`
+    : "Tap Start: connects the HUD, gets your GPS position and routes from where you are.";
+  document.getElementById("tripSheet").hidden = false;
+}
 
-    // OSRM steps -> maneuvers anchored to the nearest full-geometry vertex (searching forward)
-    const rawManeuvers = [];
-    let searchFrom = 0;
-    for (const step of route.legs.flatMap((l) => l.steps)) {
+function hideTripSheet() {
+  document.getElementById("tripSheet").hidden = true;
+}
+
+async function startTrip(parsed) {
+  hideTripSheet();
+  if ("wakeLock" in navigator) navigator.wakeLock.request("screen").catch(() => {});
+  // Bluetooth first: requestDevice() is only allowed shortly after the user's tap
+  if (!ble.connected) {
+    await connectHud().catch((err) => logMsg(`BLE: ${err.message} (route continues; tap Connect HUD to retry)`));
+  }
+  try {
+    logMsg("Getting GPS position...");
+    const here = await acquireCurrentGps();
+    const dest = await resolveTripPlace(parsed.dest);
+    const via = [];
+    for (const v of parsed.via || []) via.push({ ...(await resolveTripPlace(v)), passed: false });
+    activeTrip = { dest, via, startedAt: Date.now(), arrived: false };
+    saveTrip();
+    document.getElementById("inpStart").value = "Current Location";
+    document.getElementById("inpDest").value = dest.label;
+    await planRoute({ lat: here.lat, lon: here.lon, label: "Current Location" }, via, dest);
+    startGpsTracking();
+  } catch (err) {
+    logMsg(`Trip error: ${err.message}`);
+  }
+}
+
+// Called on every GPS fix while a trip is active: stops, arrival and off-route rerouting
+function onTripPosition(lat, lon) {
+  if (!activeTrip || activeTrip.arrived) return;
+  const here = { lat, lon };
+  for (const v of activeTrip.via) {
+    if (!v.passed && distM(here, v) < 50) {
+      v.passed = true;
+      saveTrip();
+      logMsg(`Reached stop: ${v.label}`);
+    }
+  }
+  if (distM(here, activeTrip.dest) < 40) {
+    activeTrip.arrived = true;
+    clearSavedTrip();
+    logMsg(`Arrived at ${activeTrip.dest.label}.`);
+    return;
+  }
+  const now = Date.now();
+  if (nav.offRouteM > 60) {
+    if (!tripState.offSince) tripState.offSince = now;
+    if (now - tripState.offSince > 5000 && now - tripState.lastRerouteMs > 15000 && !tripState.rerouting) {
+      reroute(here);
+    }
+  } else {
+    tripState.offSince = 0;
+  }
+}
+
+async function reroute(here) {
+  tripState.rerouting = true;
+  tripState.lastRerouteMs = Date.now();
+  tripState.offSince = 0;
+  logMsg("Off route: recalculating...");
+  try {
+    await planRoute({ ...here, label: "Current Location" }, activeTrip.via.filter((v) => !v.passed), activeTrip.dest, { reroute: true });
+  } catch (err) {
+    logMsg(`Reroute failed: ${err.message}`);
+  } finally {
+    tripState.rerouting = false;
+  }
+}
+
+// Incoming trip from the URL: "#go?dest=..|share=.." (iOS Shortcut) or "?title&text&url" (Android share)
+function tripFromLocation() {
+  if (location.hash.startsWith("#go?")) return parseGoParams(new URLSearchParams(location.hash.slice(4)));
+  const q = new URLSearchParams(location.search);
+  if (q.has("title") || q.has("text") || q.has("url")) {
+    return parseTripInput([q.get("title"), q.get("text"), q.get("url")].filter(Boolean).join("\n"));
+  }
+  return null;
+}
+
+function checkIncomingTrip() {
+  const t = tripFromLocation();
+  if (t && t.dest) {
+    history.replaceState(null, "", location.pathname); // don't re-trigger on reload; resume covers that
+    showTripSheet(t, false);
+    return;
+  }
+  const saved = loadSavedTrip();
+  if (saved) showTripSheet(saved, true);
+}
+
+window.addEventListener("hashchange", checkIncomingTrip);
+document.getElementById("btnTripStart").addEventListener("click", () => { if (pendingTrip) startTrip(pendingTrip); });
+document.getElementById("btnTripDismiss").addEventListener("click", () => { hideTripSheet(); pendingTrip = null; });
+
+document.getElementById("btnPasteTrip").addEventListener("click", async () => {
+  let text = "";
+  try {
+    text = await navigator.clipboard.readText();
+  } catch {
+    text = window.prompt("Paste a Maps link, address or lat,lon") || "";
+  }
+  const t = parseTripInput(text);
+  if (t && t.dest) showTripSheet(t, false);
+  else logMsg("Clipboard doesn't contain a Maps link, address or coordinates.");
+});
+
+// ============================================================================
+// Routing: OSRM (turn-by-turn, with stops) -> simplified route + roads -> HUD
+// ============================================================================
+// src/dest/via items are {lat, lon, label}. On reroute the route stays relative to the trip's
+// existing origin (so cached roads/tiles stay valid) unless we've driven > 20 km from it.
+async function planRoute(src, via, dest, opts = {}) {
+  const keepOrigin = opts.reroute && state.hasRealRoute && distM({ lat: state.originLat, lon: state.originLon }, src) < 20000;
+  const stops = [src, ...via, dest];
+  logMsg(`Routing ${src.label} -> ${via.length ? via.map((v) => v.label).join(" -> ") + " -> " : ""}${dest.label}...`);
+  const coords = stops.map((p) => `${p.lon},${p.lat}`).join(";");
+  const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true`);
+  const data = await res.json();
+  if (!data.routes || !data.routes.length) throw new Error("No driving route found");
+  const route = data.routes[0];
+
+  if (!keepOrigin) {
+    state.originLat = src.lat;
+    state.originLon = src.lon;
+  }
+  const oLat = state.originLat, oLon = state.originLon, mLon = mPerDegLonAt(oLat);
+  const fullPts = route.geometry.coordinates.map(([lon, lat]) => ({ x: (lon - oLon) * mLon, y: (lat - oLat) * M_PER_DEG_LAT }));
+
+  // OSRM steps -> maneuvers anchored to the nearest full-geometry vertex (searching forward)
+  const rawManeuvers = [];
+  let searchFrom = 0;
+  route.legs.forEach((leg, li) => {
+    const lastLeg = li === route.legs.length - 1;
+    for (const step of leg.steps) {
       const t = step.maneuver.type;
       if (t === "depart" || t === "new name" || t === "notification") continue;
       const mod = step.maneuver.modifier || "straight";
       if (t === "continue" && mod === "straight") continue;
       const [mlon, mlat] = step.maneuver.location;
-      const mx = (mlon - sLon) * mLon, my = (mlat - sLat) * M_PER_DEG_LAT;
+      const mx = (mlon - oLon) * mLon, my = (mlat - oLat) * M_PER_DEG_LAT;
       let best = searchFrom, bestD = Infinity;
       for (let i = searchFrom; i < fullPts.length; i++) {
         const d = (fullPts[i].x - mx) ** 2 + (fullPts[i].y - my) ** 2;
@@ -1457,41 +1850,72 @@ document.getElementById("btnFetchReal").addEventListener("click", async () => {
         if (bestD < 1 && d > 400 * 400) break;
       }
       searchFrom = best;
+      const arriveName = lastLeg ? dest.label : (via[li] ? via[li].label : `Stop ${li + 1}`);
       rawManeuvers.push({
         idx: best,
         id: t === "arrive" ? 9 : (OSRM_MODIFIER_TO_ID[mod] ?? 1),
-        name: t === "arrive" ? "Destination" : (step.name || step.ref || step.destinations || "").slice(0, 31)
+        name: (t === "arrive" ? arriveName : (step.name || step.ref || step.destinations || "")).slice(0, 31)
       });
     }
+  });
 
-    const simp = simplifyRouteForDevice(fullPts, rawManeuvers.map((m) => m.idx), DEVICE_MAX_ROUTE_VERTS);
-    const maneuvers = rawManeuvers.map((m) => ({ ...m, idx: simp.remap.get(m.idx) ?? simp.pts.length - 1 }));
-    if (fullPts.some((p) => Math.abs(p.x) > 32767 || Math.abs(p.y) > 32767)) {
-      logMsg("Warning: route extends > 32 km from the start; the HUD clamps coordinates beyond that.");
-    }
+  const simp = simplifyRouteForDevice(fullPts, rawManeuvers.map((m) => m.idx), DEVICE_MAX_ROUTE_VERTS);
+  const maneuvers = rawManeuvers.map((m) => ({ ...m, idx: simp.remap.get(m.idx) ?? simp.pts.length - 1 }));
+  if (fullPts.some((p) => Math.abs(p.x) > 32767 || Math.abs(p.y) > 32767)) {
+    logMsg("Warning: route extends > 32 km from its origin; the HUD clamps coordinates beyond that.");
+  }
 
-    setNavRoute(simp.pts, maneuvers, route.duration);
-    state.hasRealRoute = true;
+  setNavRoute(simp.pts, maneuvers, route.duration);
+  state.hasRealRoute = true;
+  if (!keepOrigin) {
     state.speedLimitMph = 0; // unknown until a road with a maxspeed tag is under the player
     state.ways = [];
     state.tileRuns = new Map();
     roads.center = null;
-    nav.progressM = 0;
-    autoDrive = gpsWatchId === null;
-    document.getElementById("btnSimDrive").textContent = autoDrive ? "Pause Auto-Drive" : "Resume Auto-Drive";
-    updateSimulation(0);
+  }
+  nav.progressM = 0;
+  autoDrive = gpsWatchId === null;
+  document.getElementById("btnSimDrive").textContent = autoDrive ? "Pause Auto-Drive" : "Resume Auto-Drive";
+  if (gpsWatchId !== null && currentGpsCoords) {
+    state.playerX = (currentGpsCoords.lon - oLon) * mLon;
+    state.playerY = (currentGpsCoords.lat - oLat) * M_PER_DEG_LAT;
+    locateOnRoute(state.playerX, state.playerY);
+  }
+  updateSimulation(0);
 
-    logMsg(`Route ready: ${fullPts.length} -> ${simp.pts.length} pts (tol ${simp.tol.toFixed(1)} m), ` +
-           `${maneuvers.length} maneuvers, ${(nav.total / 1609.34).toFixed(1)} mi, ${Math.round(route.duration / 60)} min.`);
-    sendRouteOverBle();
-    await ensureRoadsAround(sLat, sLon);
+  logMsg(`Route ready: ${fullPts.length} -> ${simp.pts.length} pts (tol ${simp.tol.toFixed(1)} m), ` +
+         `${maneuvers.length} maneuvers, ${(nav.total / 1609.34).toFixed(1)} mi, ${Math.round(route.duration / 60)} min.`);
+  sendRouteOverBle();
+  if (!keepOrigin) await ensureRoadsAround(src.lat, src.lon);
+}
+
+// Manual entry: source box + destination box (accepts addresses, lat,lon or pasted Maps links)
+document.getElementById("btnFetchReal").addEventListener("click", async () => {
+  try {
+    const srcInfo = await resolveLocationInput(document.getElementById("inpStart").value, true);
+    document.getElementById("lblSourceCoords").textContent = `${srcInfo.lat.toFixed(4)}, ${srcInfo.lon.toFixed(4)}`;
+    const parsed = parseTripInput(document.getElementById("inpDest").value);
+    if (!parsed || !parsed.dest) throw new Error("Please enter a Destination");
+    const dest = await resolveTripPlace(parsed.dest);
+    const via = [];
+    for (const v of parsed.via) via.push({ ...(await resolveTripPlace(v)), passed: false });
+    document.getElementById("lblDestCoords").textContent = `${dest.lat.toFixed(4)}, ${dest.lon.toFixed(4)}`;
+    activeTrip = { dest, via, startedAt: Date.now(), arrived: false };
+    saveTrip();
+    await planRoute(srcInfo, via, dest);
   } catch (err) {
     logMsg(`Route error: ${err.message}`);
   }
 });
 
+// Installable app (Android share target); network-first so updates show up immediately
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
 buildDemoGrid();
 loadDemoRoute();
+checkIncomingTrip();
 </script>
 </body>
 </html>
