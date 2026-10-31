@@ -152,6 +152,27 @@
   .round svg { width: 26px; height: 26px; }
   .round .dot { position: absolute; top: 13px; right: 13px; border: 2px solid var(--ink); width: 13px; height: 13px; }
   .hint { min-height: 18px; margin: 10px 8px 0; font-size: 13px; color: var(--muted); }
+
+  /* HUD brightness (shown while connected; the HUD remembers it per mode) */
+  .bright {
+    display: flex; align-items: center; gap: 12px; margin-top: 14px;
+    background: var(--field); border-radius: 999px; height: 52px; padding: 0 20px;
+  }
+  .bright[hidden] { display: none; }
+  .bright svg { flex: 0 0 auto; color: #9a9ea6; }
+  .bright .lbl { font-size: 13px; font-weight: 700; color: var(--muted); min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+  .bright input {
+    flex: 1; min-width: 0; -webkit-appearance: none; appearance: none; height: 6px; border-radius: 3px; outline: none;
+    background: linear-gradient(to right, var(--gold) var(--p, 50%), #d5d7dc var(--p, 50%));
+  }
+  .bright input::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 24px; height: 24px; border-radius: 50%;
+    background: #fff; border: 3px solid var(--gold); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  }
+  .bright input::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 3px solid var(--gold); }
+  .sheet.is-trip .bright { background: #24272e; }
+  .sheet.is-trip .bright input { background: linear-gradient(to right, var(--gold) var(--p, 50%), #3a3e47 var(--p, 50%)); }
+  .app.nav-mode .bright { margin-top: 10px; height: 46px; }
   .links { display: flex; justify-content: center; gap: 18px; margin-top: 18px; font-size: 13px; }
   .links a, .links summary { color: var(--muted); text-decoration: none; font-weight: 600; }
 
@@ -237,6 +258,12 @@
         <span class="dot" id="btDot"></span>
       </button>
     </div>
+    <div class="bright" id="brightRow" hidden>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/></svg>
+      <input type="range" id="rngBright" min="5" max="100" step="1" value="50" aria-label="HUD brightness">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <span class="lbl" id="brightVal">50%</span>
+    </div>
     <div class="hint" id="hint"></div>
 
     <div class="links">
@@ -287,7 +314,10 @@
 const SERVICE_UUID        = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const CHAR_TELEMETRY_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 const CHAR_GEOMETRY_UUID  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const CHAR_STATUS_UUID    = "6e400004-b5a3-f393-e0a9-e50e24dcca9e"; // read: microSD present, etc.
 const PKT_TELEMETRY = 0x01, PKT_STREET_NAME = 0x02, PKT_ROUTE_POLYLINE = 0x10, PKT_ROAD_TILE = 0x20;
+const PKT_TILE_STORE = 0x21;
+const PKT_SETTINGS = 0x03;   // [0x03, brightness %] for the HUD's current mode (saved on the HUD) // same tile payload, stored on the HUD's microSD (route preload)
 // Area polygons ride in the road tiles as extra "tiers" (firmware AreaTier), drawn in this order
 const AREA_TIER_BUILDING = 16, AREA_TIER_PARK = 17, AREA_TIER_WATER = 18;
 const TILE_LON_E7 = 50000, TILE_LAT_E7 = 45000;
@@ -458,25 +488,26 @@ function updateNavDerivedState() {
 // Rendering — mirrors the firmware (src/ui_gta_map.cpp, src/ui_turn_hud.cpp, src/gta_sprites.h)
 // ============================================================================
 const THEMES = {
-  normal: {
-    light: false, mapBg: "#08080A", colBg: "#000000", rgbBg: "0,0,0",
-    textMain: "#FFFFFF", textMuted: "#C8CCD4", textEta: "#00E5FF",
-    casings: true, roadLocal: "#4A505C", artCasing: "#181A20", artCore: "#7A8291", hwyCasing: "#101216", hwyCore: "#9BA3B5",
-    routeCasing: "#000000", routeCore: "#FFB800",
+  normal: { // GTA V minimap with bold ink casings (kNormalTheme)
+    light: false, mapBg: "#20242A", colBg: "#000000", rgbBg: "0,0,0",
+    textMain: "#FFFFFF", textMuted: "#C8CCD4", textEta: "#FFC21A",
+    casings: true, roadLocal: "#8A9199", artCasing: "#0D0F12", artCore: "#CDD2D8", hwyCasing: "#0D0F12", hwyCore: "#F5F6F7",
+    routeCasing: "#14061F", routeCore: "#B45CFF",
     playerFill: "#FFFFFF", playerOutline: "#000000",
     blipOutline: "#000000", blipRed: "#E52521", blipYellow: "#FFD700",
-    destRing: "#FFB800", destGap: "#000000", destCore: "#FFB800",
-    northBg: "#000000", northFg: "#FFFFFF", barTrack: "#2A2E36", speedoFill: "#FFFFFF", blurTint: 140 / 256
+    destRing: "#B45CFF", destGap: "#000000", destCore: "#B45CFF",
+    northBg: "#000000", northFg: "#FFFFFF", barTrack: "#2A2E36", speedoFill: "#FFFFFF",
+    areas: true, areaBlock: "#3D434C", areaPark: "#2F5D3B", areaWater: "#1D4F7D"
   },
   hud: { // pure black reflects as clear glass on the windshield; only bright content shows
     light: false, mapBg: "#000000", colBg: "#000000", rgbBg: "0,0,0",
     textMain: "#FFFFFF", textMuted: "#FFFFFF", textEta: "#00E5FF",
-    casings: false, roadLocal: "#8C8C8C", artCasing: "#000000", artCore: "#FFFFFF", hwyCasing: "#000000", hwyCore: "#FFFFFF",
+    casings: true, roadLocal: "#787878", artCasing: "#000000", artCore: "#C8C8C8", hwyCasing: "#000000", hwyCore: "#DCDCDC",
     routeCasing: "#000000", routeCore: "#00FF40",
     playerFill: "#FF1A1A", playerOutline: "#000000",
     blipOutline: "#000000", blipRed: "#FF1744", blipYellow: "#FFEA00",
     destRing: "#FFFFFF", destGap: "#000000", destCore: "#00FF40",
-    northBg: "#000000", northFg: "#FFFFFF", barTrack: "#333333", speedoFill: "#00FF40", blurTint: 140 / 256
+    northBg: "#000000", northFg: "#FFFFFF", barTrack: "#333333", speedoFill: "#00FF40", areas: false
   }
 };
 const LINK_OK = "#00E676", LINK_DOWN = "#FF1744", HUD_GREEN = "#00FF40";
@@ -490,7 +521,7 @@ const LAYOUTS = {
     playerX: 172, playerY: 124, clampX0: 112, clampX1: 244, blipMargin: 13,
     infoX: 46, arrowY: 28, arrowSize: 46, distY: 64, distPx: 21, streetY: 86, streetPx: 12, infoMaxW: 90,
     leftFadeW: 112, leftFadeH: 104,
-    speedoX: 48, speedoY: 136, speedoR: 24, speedoHalfW: 2, speedoNumPx: 17, speedoMphPx: 8, blurR: 38, blurPx: 7,
+    speedoX: 48, speedoY: 136, speedoR: 24, speedoHalfW: 2, speedoNumPx: 17, speedoMphPx: 8, shadeR: 38,
     etaX: 290, etaNumY: 118, etaNumPx: 38, etaUnitY: 146, etaDistY: 163, etaSmallPx: 13,
     rightFadeX: 244, rightFadeY: 88, dotX: 310, dotY: 10, dotR: 5,
     turn: { arrowX: 78, arrowY: 90, arrowSize: 140, numX: 236, numY: 48, numPx: 48, unitY: 86, unitPx: 21,
@@ -502,7 +533,7 @@ const LAYOUTS = {
     playerX: 258, playerY: 230, clampX0: 168, clampX1: 362, blipMargin: 22,
     infoX: 72, arrowY: 52, arrowSize: 84, distY: 120, distPx: 26, streetY: 152, streetPx: 13, infoMaxW: 136,
     leftFadeW: 168, leftFadeH: 180,
-    speedoX: 74, speedoY: 250, speedoR: 40, speedoHalfW: 3, speedoNumPx: 26, speedoMphPx: 12, blurR: 60, blurPx: 11,
+    speedoX: 74, speedoY: 250, speedoR: 40, speedoHalfW: 3, speedoNumPx: 26, speedoMphPx: 12, shadeR: 60,
     etaX: 428, etaNumY: 212, etaNumPx: 58, etaUnitY: 256, etaDistY: 290, etaSmallPx: 17,
     rightFadeX: 362, rightFadeY: 166, dotX: 464, dotY: 16, dotR: 7,
     turn: { arrowX: 120, arrowY: 165, arrowSize: 230, numX: 354, numY: 88, numPx: 72, unitY: 150, unitPx: 34,
@@ -675,21 +706,11 @@ function overlayFade(fw, fh, fromLeft, taperBottom) {
   return c;
 }
 
-// Heavy blur + tint disc behind the speedometer, feathered over the outer 4 px (applyBlurDisc)
-const blurCanvas = document.createElement("canvas");
-function blurDisc(cx, cy, R) {
-  const d = 2 * R + 2, th = theme();
-  blurCanvas.width = blurCanvas.height = d;
-  const g = blurCanvas.getContext("2d");
-  g.filter = `blur(${L.blurPx}px)`;
-  g.drawImage(frameCanvas, cx - R - 1, cy - R - 1, d, d, 0, 0, d, d);
-  g.filter = "none";
-  g.fillStyle = `rgba(${th.rgbBg},${th.blurTint})`; g.fillRect(0, 0, d, d);
-  g.globalCompositeOperation = "destination-in";
-  const rg = g.createRadialGradient(R + 1, R + 1, R - 4, R + 1, R + 1, R);
-  rg.addColorStop(0, "rgba(0,0,0,1)"); rg.addColorStop(1, "rgba(0,0,0,0)");
-  g.fillStyle = rg; g.fillRect(0, 0, d, d);
-  fx.drawImage(blurCanvas, cx - R - 1, cy - R - 1);
+// Dark disc behind the speedometer, soft 8 px edge (applyShadeDisc): keeps 25% of the map
+function shadeDisc(cx, cy, R) {
+  const rgb = theme().rgbBg, g = fx.createRadialGradient(cx, cy, R - 8, cx, cy, R);
+  g.addColorStop(0, `rgba(${rgb},0.75)`); g.addColorStop(1, `rgba(${rgb},0)`);
+  fx.fillStyle = g; fx.beginPath(); fx.arc(cx, cy, R, 0, Math.PI * 2); fx.fill();
 }
 
 function edgeVignette() {
@@ -745,24 +766,35 @@ function renderModeA(dt) {
     pts.forEach((pt, i) => { const s = project(pt.x, pt.y); if (i) fx.lineTo(s.x, s.y); else fx.moveTo(s.x, s.y); });
     fx.stroke();
   };
+  if (th.areas) { // water, parks, buildings (flat fills)
+    for (const [list, col] of [[state.areas.water, th.areaWater], [state.areas.parks, th.areaPark], [state.areas.blocks, th.areaBlock]]) {
+      fx.fillStyle = col;
+      for (const pts of list) {
+        fx.beginPath();
+        pts.forEach((pt, i) => { const s = project(pt.x, pt.y); if (i) fx.lineTo(s.x, s.y); else fx.moveTo(s.x, s.y); });
+        fx.closePath(); fx.fill("evenodd");
+      }
+    }
+  }
+  const coreW = (t) => (t === 3 ? 8 : (t === 2 ? 6 : 4)) * widthBoost;
   if (th.casings) {
     for (const way of state.ways) {
-      if (way.tier < 2 || way.pts.length < 2) continue;
+      if (way.pts.length < 2) continue;
       fx.strokeStyle = way.tier === 3 ? th.hwyCasing : th.artCasing;
-      fx.lineWidth = (way.tier === 3 ? 10 : 8) * widthBoost;
+      fx.lineWidth = coreW(way.tier) + 3.5 * widthBoost;
       stroke(way.pts);
     }
   }
   for (const way of state.ways) {
     if (way.pts.length < 2) continue;
     fx.strokeStyle = way.tier === 3 ? th.hwyCore : (way.tier === 2 ? th.artCore : th.roadLocal);
-    fx.lineWidth = (way.tier === 3 ? 7 : (way.tier === 2 ? 5 : 3)) * widthBoost;
+    fx.lineWidth = coreW(way.tier);
     stroke(way.pts);
   }
   if (state.routePts.length >= 2) {
     const route = [{ x: state.playerX, y: state.playerY }, ...state.routePts.slice(state.closestRouteIdx)];
-    fx.strokeStyle = th.routeCasing; fx.lineWidth = 9 * widthBoost; stroke(route);
-    fx.strokeStyle = th.routeCore; fx.lineWidth = 5 * widthBoost; stroke(route);
+    fx.strokeStyle = th.routeCasing; fx.lineWidth = 12 * widthBoost; stroke(route);
+    fx.strokeStyle = th.routeCore; fx.lineWidth = 7 * widthBoost; stroke(route);
   }
 
   // Blips (no text on the map)
@@ -794,7 +826,7 @@ function renderModeA(dt) {
   edgeVignette();
   fx.drawImage(overlayFade(L.leftFadeW, L.leftFadeH, true, true), 0, 0);
   fx.drawImage(overlayFade(L.w - L.rightFadeX, L.h - L.rightFadeY, false, false), L.rightFadeX, L.rightFadeY);
-  blurDisc(L.speedoX, L.speedoY, L.blurR);
+  shadeDisc(L.speedoX, L.speedoY, L.shadeR);
 
   // Top-left: turn arrow, distance, street
   drawManeuverArrow(L.infoX, L.arrowY, L.arrowSize, state.maneuverId, hudMode ? HUD_GREEN : (th.light ? "#000" : "#FFF"), th.colBg);
@@ -1146,44 +1178,100 @@ const OSRM_MODIFIER_TO_ID = {
 // ============================================================================
 // Road tiles: Overpass -> per-tile runs -> 0x20 payloads (grid matches the firmware)
 // ============================================================================
-const roads = { center: null, inflight: false, lastFailMs: 0 };
-// Downloaded map data kept in lat/lon so it survives origin changes (e.g. starting a trip here)
-const mapCache = { ways: [], areas: { blocks: [], parks: [], water: [] } };
-// Area (buildings/parks/water) download state: gen invalidates in-flight requests when the map
-// is reset; pending re-requests the latest spot once the current request finishes
-const areasLoad = { inflight: false, pending: null, gen: 0 };
+// ============================================================================
+// Map data store. The phone downloads OSM roads + buildings/parks/water (it has the mobile
+// data; the HUD never needs internet) in HUD-tile-sized cells and keeps them in lat/lon:
+//  - around the vehicle: the 5x5 cells (~2 x 2.3 km) around the player;
+//  - on a trip: the whole route corridor (cells along the route plus one either side) is
+//    preloaded from Start, nearest first, up to PRELOAD_AHEAD_M ahead of the car.
+// Live 3x3 tiles then stream to the HUD from phone memory, even through dead zones, and if the
+// HUD has a microSD card the corridor tiles are also sent ahead of time and stored there.
+// ============================================================================
+const PRELOAD_AHEAD_M = 40000;   // route corridor window ahead of the car
+const STORE_MAX_ITEMS = 120000;  // roads + areas kept in phone memory before far data is evicted
+const PROJ_RADIUS_M = 2500;      // radar/simulator/speed-limit work on data within this radius
+const HIGHWAY_RE = "^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street)$";
 
-function projectMapCache() {
+const mapStore = {
+  ways: new Map(),       // "w<id>" -> { tier, limit, ll: [[lat,lon]], bb: [s,w,n,e] }
+  areas: new Map(),      // "w<id>" | "r<id>.<n>" -> { kind: "blocks"|"parks"|"water", ll, bb }
+  cells: new Set(),      // downloaded cells
+  queue: [], queued: new Set(), retryAt: new Map(), inflight: false,
+  tileRuns: new Map(), tileAreas: new Map(), // per-tile index of the whole store (HUD payloads)
+  projCenter: null, projDirty: true,
+  corridor: [], corridorSet: new Set(),      // route corridor cells [{ key, along }] in route order
+  sdQueue: [], sdQueued: new Set(), sdSent: new Map() // corridor tiles for the HUD's microSD
+};
+state.tileRuns = mapStore.tileRuns;
+state.tileAreas = mapStore.tileAreas;
+
+// Developer "Simulate drive" without a trip uses the synthetic demo city instead of the store
+const isDemo = () => simulating && !state.hasRealRoute;
+
+function cellBox(key) {
+  const [tx, ty] = key.split(",").map(Number);
+  const s = ty * TILE_LAT_E7 * 1e-7, w = tx * TILE_LON_E7 * 1e-7;
+  return { s, w, n: s + TILE_LAT_E7 * 1e-7, e: w + TILE_LON_E7 * 1e-7 };
+}
+
+// Cells within r of the one containing (lat, lon), nearest first
+function neighbourCells(lat, lon, r) {
+  const tx = tileXOf(lon), ty = tileYOf(lat), out = [];
+  for (let d = 0; d <= r; d++) {
+    for (let dx = -d; dx <= d; dx++) {
+      for (let dy = -d; dy <= d; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) === d) out.push(tileKey(tx + dx, ty + dy));
+      }
+    }
+  }
+  return out;
+}
+
+function llBounds(ll) {
+  let s = 90, w = 180, n = -90, e = -180;
+  for (const [la, lo] of ll) { if (la < s) s = la; if (la > n) n = la; if (lo < w) w = lo; if (lo > e) e = lo; }
+  return [s, w, n, e];
+}
+
+// Projects the store data near (lat, lon) into session meters for the radar, simulator and
+// speed-limit lookup (the HUD gets tiles straight from the per-tile index instead)
+function projectNearby(lat, lon) {
+  if (isDemo()) return;
   const oLat = state.originLat, oLon = state.originLon, mLon = mPerDegLonAt(oLat);
   const proj = (ll) => ll.map(([la, lo]) => ({ x: (lo - oLon) * mLon, y: (la - oLat) * M_PER_DEG_LAT }));
-  state.ways = mapCache.ways.map((w) => ({ tier: w.tier, limit: w.limit, pts: proj(w.ll) }));
-  const a = mapCache.areas;
-  state.areas = { blocks: a.blocks.map(proj), parks: a.parks.map(proj), water: a.water.map(proj) };
+  const dLat = PROJ_RADIUS_M / M_PER_DEG_LAT, dLon = PROJ_RADIUS_M / mPerDegLonAt(lat);
+  const s = lat - dLat, n = lat + dLat, w = lon - dLon, e = lon + dLon;
+  const hit = (bb) => bb[2] >= s && bb[0] <= n && bb[3] >= w && bb[1] <= e;
+  const ways = [], areas = { blocks: [], parks: [], water: [] };
+  for (const way of mapStore.ways.values()) if (hit(way.bb)) ways.push({ tier: way.tier, limit: way.limit, pts: proj(way.ll) });
+  for (const ar of mapStore.areas.values()) if (hit(ar.bb)) areas[ar.kind].push(proj(ar.ll));
+  state.ways = ways;
+  state.areas = areas;
+  mapStore.projCenter = { lat, lon };
+  mapStore.projDirty = false;
 }
 
-function clearMapCache() {
-  mapCache.ways = [];
-  mapCache.areas = { blocks: [], parks: [], water: [] };
+// Back to the real map after the developer demo city
+function restoreRealMap() {
+  state.tileRuns = mapStore.tileRuns;
+  state.tileAreas = mapStore.tileAreas;
   state.ways = [];
-  state.tileRuns = new Map();
-  state.tileAreas = new Map();
   state.areas = { blocks: [], parks: [], water: [] };
-  roads.center = null;
-  areasLoad.gen++;
-  areasLoad.pending = null;
+  mapStore.projDirty = true;
 }
 
-// Move the map origin; reuse downloaded roads/areas if they cover the new spot
+// Move the map origin (session meters); the lat/lon store itself never needs reloading
 function rebaseMap(lat, lon) {
   state.originLat = lat;
   state.originLon = lon;
-  if (roads.center && distM(roads.center, { lat, lon }) < 1000) projectMapCache();
-  else clearMapCache();
+  mapStore.projDirty = true;
+  projectNearby(lat, lon);
 }
 
 const tileKey = (tx, ty) => `${tx},${ty}`;
 const tileXOf = (lon) => Math.floor(Math.round(lon * 1e7) / TILE_LON_E7);
 const tileYOf = (lat) => Math.floor(Math.round(lat * 1e7) / TILE_LAT_E7);
+const cellKeyAt = (lat, lon) => tileKey(tileXOf(lon), tileYOf(lat));
 
 // OSM maxspeed -> mph ("35 mph" -> 35, "50" (km/h by default) -> 31, "none"/"signals" -> 0)
 function parseMaxspeedMph(tag) {
@@ -1387,7 +1475,12 @@ async function overpassQuery(query) {
   for (const url of OVERPASS_URLS) {
     try {
       const res = await fetch(url, { method: "POST", body: "data=" + encodeURIComponent(query) });
-      if (res.ok) return await res.json();
+      if (res.ok) {
+        const json = await res.json();
+        // Timeouts/out-of-memory come back as HTTP 200 with partial data and a remark
+        if (json.remark && /error|timed out|out of memory/i.test(json.remark)) throw new Error(json.remark.slice(0, 120));
+        return json;
+      }
       last = new Error(`${new URL(url).host} HTTP ${res.status}`);
     } catch (err) {
       last = err;
@@ -1420,87 +1513,214 @@ function assembleRings(segs) {
   return rings;
 }
 
-// City blocks, parks and water for the app's radar (~1 km box), loaded after the roads.
-async function loadAreasAround(lat, lon) {
-  if (areasLoad.inflight) { areasLoad.pending = { lat, lon }; return; }
-  areasLoad.inflight = true;
-  const gen = areasLoad.gen;
+// One Overpass request covers a compact rectangle of cells (cheaper for the public servers
+// than many small boxes); every cell inside it counts as downloaded afterwards
+function rectQuery(r) {
+  const bb = `${r.s.toFixed(5)},${r.w.toFixed(5)},${r.n.toFixed(5)},${r.e.toFixed(5)}`;
+  return `[out:json][timeout:60];(` +
+    `way["highway"~"${HIGHWAY_RE}"](${bb});` +
+    `way["building"](${bb});` +
+    `way["leisure"~"^(park|garden|pitch|playground)$"](${bb});` +
+    `way["landuse"~"^(grass|recreation_ground|cemetery|forest|meadow)$"](${bb});` +
+    `way["natural"~"^(water|wood)$"](${bb});` +
+    `relation["natural"="water"](${bb});` +
+    `relation["waterway"="riverbank"](${bb});` +
+    `);out geom qt;`;
+}
+
+// Takes the first queued cell plus any queued cells that keep the rectangle within
+// MAX_RECT_CELLS x MAX_RECT_CELLS cells (~2.5 km)
+const MAX_RECT_CELLS = 6;
+function takeBatchRect() {
+  const pos = (k) => k.split(",").map(Number);
+  const [fx, fy] = pos(mapStore.queue[0]);
+  let x0 = fx, x1 = fx, y0 = fy, y1 = fy;
+  const keep = [];
+  for (const k of mapStore.queue) {
+    const [x, y] = pos(k);
+    const nx0 = Math.min(x0, x), nx1 = Math.max(x1, x), ny0 = Math.min(y0, y), ny1 = Math.max(y1, y);
+    if (nx1 - nx0 < MAX_RECT_CELLS && ny1 - ny0 < MAX_RECT_CELLS) { x0 = nx0; x1 = nx1; y0 = ny0; y1 = ny1; } else keep.push(k);
+  }
+  const lo = cellBox(tileKey(x0, y0)), hi = cellBox(tileKey(x1, y1));
+  const cells = [];
+  for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) cells.push(tileKey(x, y));
+  mapStore.queue = keep;
+  return { rect: { s: lo.s, w: lo.w, n: hi.n, e: hi.e }, cells };
+}
+
+// Adds new OSM elements to the store (ways seen in an earlier batch are skipped)
+function addOsmToStore(osm) {
+  const added = { ways: [], areas: { blocks: [], parks: [], water: [] } };
   const toLL = (p) => [p.lat, p.lon];
-  try {
-    const dLat = 0.009, dLon = 0.012;
-    const bb = `${(lat - dLat).toFixed(4)},${(lon - dLon).toFixed(4)},${(lat + dLat).toFixed(4)},${(lon + dLon).toFixed(4)}`;
-    const osm = await overpassQuery(`[out:json][timeout:25];(
-      way["building"](${bb});
-      way["leisure"~"^(park|garden|pitch|playground)$"](${bb});
-      way["landuse"~"^(grass|recreation_ground|cemetery|forest|meadow)$"](${bb});
-      way["natural"~"^(water|wood)$"](${bb});
-      relation["natural"="water"](${bb});
-      relation["waterway"="riverbank"](${bb});
-    );out geom qt;`);
-    if (gen !== areasLoad.gen || !roads.center || distM(roads.center, { lat, lon }) > 1500) return; // stale
-    const areas = { blocks: [], parks: [], water: [] };
-    for (const el of osm.elements || []) {
-      const t = el.tags || {};
-      if (el.type === "way" && el.geometry && el.geometry.length > 2) {
-        const pts = el.geometry.map(toLL);
-        if (t.building) areas.blocks.push(pts);
-        else if (t.natural === "water") areas.water.push(pts);
-        else areas.parks.push(pts);
-      } else if (el.type === "relation" && el.members) {
-        const outer = el.members.filter((m) => m.role !== "inner" && m.geometry).map((m) => m.geometry.map(toLL));
-        for (const ring of assembleRings(outer)) areas.water.push(ring);
+  for (const el of osm.elements || []) {
+    const t = el.tags || {};
+    if (el.type === "way" && el.geometry && el.geometry.length >= 2) {
+      const id = "w" + el.id;
+      if (mapStore.ways.has(id) || mapStore.areas.has(id)) continue;
+      const ll = el.geometry.map(toLL);
+      if (t.highway) {
+        const way = { tier: highwayTier(t.highway), limit: parseMaxspeedMph(t.maxspeed), ll, bb: llBounds(ll) };
+        mapStore.ways.set(id, way);
+        added.ways.push(way);
+      } else if (ll.length > 2) {
+        const kind = t.building ? "blocks" : t.natural === "water" ? "water" : "parks";
+        mapStore.areas.set(id, { kind, ll, bb: llBounds(ll) });
+        added.areas[kind].push(ll);
       }
+    } else if (el.type === "relation" && el.members) {
+      const id = "r" + el.id;
+      if (mapStore.areas.has(id + ".0")) continue;
+      const outer = el.members.filter((m) => m.role !== "inner" && m.geometry).map((m) => m.geometry.map(toLL));
+      assembleRings(outer).forEach((ring, i) => {
+        if (ring.length < 3) return;
+        mapStore.areas.set(`${id}.${i}`, { kind: "water", ll: ring, bb: llBounds(ring) });
+        added.areas.water.push(ring);
+      });
     }
-    mapCache.areas = areas;
-    projectMapCache();
-    state.tileAreas = indexAreasIntoTiles(areas);
-    ble.lastTileKey = null; // resend the tiles around the player with the new detail
-    logMsg(`Loaded ${areas.blocks.length} buildings, ${areas.parks.length} parks, ${areas.water.length} water areas for the radar.`);
-  } catch (err) {
-    logMsg(`Map detail fetch failed: ${errText(err)}`);
-  } finally {
-    areasLoad.inflight = false;
-    const next = areasLoad.pending;
-    areasLoad.pending = null;
-    if (next && roads.center && distM(roads.center, next) < 1500) loadAreasAround(next.lat, next.lon);
+  }
+  return added;
+}
+
+function mergeTileIndex(dst, src, touched) {
+  for (const [k, list] of src) {
+    const cur = dst.get(k);
+    if (cur) cur.push(...list); else dst.set(k, list);
+    touched.add(k);
   }
 }
 
-async function ensureRoadsAround(lat, lon) {
-  if (!(state.hasRealRoute || gpsWatchId !== null) || roads.inflight) return;
-  if (roads.center) {
-    const dx = (lon - roads.center.lon) * mPerDegLonAt(lat), dy = (lat - roads.center.lat) * M_PER_DEG_LAT;
-    if (Math.hypot(dx, dy) < 1200) return;
+function queueSdTile(key) {
+  if (mapStore.corridorSet.has(key) && !mapStore.sdQueued.has(key)) {
+    mapStore.sdQueued.add(key);
+    mapStore.sdQueue.push(key);
   }
-  if (Date.now() - roads.lastFailMs < 15000) return;
-  roads.inflight = true;
-  try {
-    const dLat = 0.018, dLon = 0.024; // ~2 km around the player
-    const bbox = `${(lat - dLat).toFixed(4)},${(lon - dLon).toFixed(4)},${(lat + dLat).toFixed(4)},${(lon + dLon).toFixed(4)}`;
-    const query = `[out:json][timeout:20];way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street)$"](${bbox});out geom qt;`;
-    const osm = await overpassQuery(query);
-    const osmWays = [];
-    for (const el of osm.elements || []) {
-      if (el.type !== "way" || !el.geometry || el.geometry.length < 2) continue;
-      osmWays.push({
-        tier: highwayTier(el.tags?.highway || "residential"),
-        limit: parseMaxspeedMph(el.tags?.maxspeed),
-        ll: el.geometry.map((p) => [p.lat, p.lon])
-      });
+}
+
+function onStoreGrew(added) {
+  const touched = new Set();
+  mergeTileIndex(mapStore.tileRuns, indexWaysIntoTiles(added.ways), touched);
+  mergeTileIndex(mapStore.tileAreas, indexAreasIntoTiles(added.areas), touched);
+  for (const k of touched) queueSdTile(k);
+  mapStore.projDirty = true;
+  ble.lastTileKey = null; // re-check the live 3x3 tiles on the HUD
+}
+
+// Queues cells for download; urgent ones (around the player) jump the queue
+function requestCells(keys, urgent) {
+  const now = Date.now(), fresh = [];
+  for (const k of keys) {
+    if (mapStore.cells.has(k) || (mapStore.retryAt.get(k) || 0) > now) continue;
+    if (mapStore.queued.has(k)) {
+      const at = mapStore.queue.indexOf(k);
+      if (!urgent || at < 0) continue; // at < 0: already downloading
+      mapStore.queue.splice(at, 1);
     }
-    mapCache.ways = osmWays;
-    projectMapCache();
-    state.tileRuns = indexWaysIntoTiles(osmWays);
-    roads.center = { lat, lon };
-    ble.lastTileKey = null; // force a tile refresh on the HUD
-    logMsg(`Loaded ${osmWays.length} OSM roads (${state.tileRuns.size} tiles) around the player.`);
-    loadAreasAround(lat, lon);
-  } catch (err) {
-    roads.lastFailMs = Date.now();
-    logMsg(`Road fetch failed: ${err.message}`);
-  } finally {
-    roads.inflight = false;
+    mapStore.queued.add(k);
+    fresh.push(k);
   }
+  if (!fresh.length) return;
+  if (urgent) mapStore.queue.unshift(...fresh); else mapStore.queue.push(...fresh);
+  pumpMapQueue();
+}
+
+async function pumpMapQueue() {
+  if (mapStore.inflight || !mapStore.queue.length) return;
+  const { rect, cells } = takeBatchRect();
+  mapStore.inflight = true;
+  try {
+    const osm = await overpassQuery(rectQuery(rect));
+    const added = addOsmToStore(osm);
+    for (const k of cells) { mapStore.cells.add(k); mapStore.queued.delete(k); }
+    onStoreGrew(added);
+    const total = mapStore.corridor.length;
+    const ready = total ? mapStore.corridor.filter((c) => mapStore.cells.has(c.key)).length : 0;
+    logMsg(`Map: +${added.ways.length} roads, +${Object.values(added.areas).reduce((n, l) => n + l.length, 0)} areas` +
+           (total ? ` (route ${ready}/${total} tiles ready offline)` : ""));
+  } catch (err) {
+    const retry = Date.now() + 20000; // e.g. no signal: try again later (the HUD keeps what it has)
+    for (const k of cells) if (mapStore.queued.delete(k)) mapStore.retryAt.set(k, retry);
+    logMsg(`Map download failed (retrying in 20 s): ${errText(err)}`);
+  } finally {
+    mapStore.inflight = false;
+    if (mapStore.queue.length) setTimeout(pumpMapQueue, 250);
+  }
+}
+
+// Route corridor: every cell within one cell of the route, tagged with its distance along it
+function setCorridor(coordsLonLat) {
+  const seen = new Map();
+  const addAround = (lat, lon, along) => {
+    for (const k of neighbourCells(lat, lon, 1)) if (!seen.has(k)) seen.set(k, along);
+  };
+  let along = 0;
+  coordsLonLat.forEach(([lon, lat], i) => {
+    if (!i) { addAround(lat, lon, 0); return; }
+    const [plon, plat] = coordsLonLat[i - 1];
+    const seg = distM({ lat: plat, lon: plon }, { lat, lon }), n = Math.max(1, Math.ceil(seg / 150));
+    for (let j = 1; j <= n; j++) addAround(plat + (lat - plat) * j / n, plon + (lon - plon) * j / n, along + seg * j / n);
+    along += seg;
+  });
+  mapStore.corridor = [...seen].map(([key, a]) => ({ key, along: a })).sort((x, y) => x.along - y.along);
+  mapStore.corridorSet = new Set(seen.keys());
+  mapStore.sdQueue = [];
+  mapStore.sdQueued.clear();
+  for (const c of mapStore.corridor) if (mapStore.cells.has(c.key)) queueSdTile(c.key);
+  logMsg(`Preloading the route map: ${mapStore.corridor.length} tiles along ${(along / 1609.34).toFixed(1)} mi.`);
+  requestCorridorWindow();
+}
+
+function clearCorridor() {
+  mapStore.corridor = [];
+  mapStore.corridorSet = new Set();
+  mapStore.sdQueue = [];
+  mapStore.sdQueued.clear();
+}
+
+function requestCorridorWindow() {
+  if (!mapStore.corridor.length) return;
+  const from = nav.progressM - 1500, to = nav.progressM + PRELOAD_AHEAD_M;
+  requestCells(mapStore.corridor.filter((c) => c.along >= from && c.along <= to).map((c) => c.key), false);
+}
+
+// Keeps phone memory bounded on long drives: drops data that is far from the car and not on
+// the route ahead, then rebuilds the per-tile index from what is left
+function evictIfNeeded(lat, lon) {
+  if (mapStore.ways.size + mapStore.areas.size < STORE_MAX_ITEMS) return;
+  const keep = new Set(neighbourCells(lat, lon, 4));
+  const from = nav.progressM - 1500, to = nav.progressM + PRELOAD_AHEAD_M;
+  for (const c of mapStore.corridor) if (c.along >= from && c.along <= to) keep.add(c.key);
+  const touchesKept = (bb) => {
+    for (let tx = tileXOf(bb[1]); tx <= tileXOf(bb[3]); tx++) {
+      for (let ty = tileYOf(bb[0]); ty <= tileYOf(bb[2]); ty++) if (keep.has(tileKey(tx, ty))) return true;
+    }
+    return false;
+  };
+  for (const [id, way] of mapStore.ways) if (!touchesKept(way.bb)) mapStore.ways.delete(id);
+  for (const [id, ar] of mapStore.areas) if (!touchesKept(ar.bb)) mapStore.areas.delete(id);
+  for (const k of [...mapStore.cells]) if (!keep.has(k)) mapStore.cells.delete(k);
+  const areas = { blocks: [], parks: [], water: [] };
+  for (const ar of mapStore.areas.values()) areas[ar.kind].push(ar.ll);
+  mapStore.tileRuns = indexWaysIntoTiles([...mapStore.ways.values()]);
+  mapStore.tileAreas = indexAreasIntoTiles(areas);
+  if (!isDemo()) { state.tileRuns = mapStore.tileRuns; state.tileAreas = mapStore.tileAreas; }
+  mapStore.projDirty = true;
+  ble.lastTileKey = null;
+  logMsg(`Map memory trimmed to ${mapStore.ways.size} roads, ${mapStore.areas.size} areas.`);
+}
+
+// Called every telemetry tick: what to download next, and keep the projected data current
+let lastMapCell = null, lastMapCheckMs = 0;
+function mapTick(lat, lon) {
+  if (isDemo() || !(state.hasRealRoute || gpsWatchId !== null)) return;
+  const cell = cellKeyAt(lat, lon), now = Date.now();
+  if (cell !== lastMapCell || now - lastMapCheckMs > 2000) {
+    lastMapCell = cell;
+    lastMapCheckMs = now;
+    requestCells(neighbourCells(lat, lon, 2), true);
+    requestCorridorWindow();
+    evictIfNeeded(lat, lon);
+  }
+  if (mapStore.projDirty || !mapStore.projCenter || distM(mapStore.projCenter, { lat, lon }) > 800) projectNearby(lat, lon);
 }
 
 // ============================================================================
@@ -1510,14 +1730,17 @@ const ble = {
   device: null, tel: null, geo: null, connected: false,
   queue: Promise.resolve(), telPending: false, transferId: 1,
   lastStreetSig: "", lastStreetMs: 0,
-  lastTileKey: null, sentTiles: new Map(), reconnectTries: 0
+  lastTileKey: null, sentTiles: new Map(), reconnectTries: 0,
+  pending: 0,              // queued GATT writes (route-preload tiles only go out when this is 0)
+  caps: { sd: false, pak: false }
 };
 
 // Web Bluetooth rejects overlapping GATT operations, so every write goes through one chain
 function bleEnqueue(fn) {
+  ble.pending++;
   ble.queue = ble.queue.then(fn).catch((err) => {
     if (ble.connected) logMsg(`BLE write failed: ${errText(err)}`);
-  });
+  }).finally(() => { ble.pending = Math.max(0, ble.pending - 1); });
   return ble.queue;
 }
 
@@ -1579,11 +1802,16 @@ function sendStreetIfChanged(force) {
   bleEnqueue(async () => { if (ble.tel) await writeWithResponse(ble.tel, pkt); });
 }
 
-// Each chunk is its own queue item so telemetry keeps flowing during large transfers
-function sendChunkedPayload(payloadType, bytes) {
+// Geometry transfers (route, tiles) go out one at a time, chunk by chunk: the HUD reassembles
+// one transfer at a time, so chunks of different transfers must never interleave, but telemetry
+// (a different characteristic) slips in between chunks. Live transfers (route, nearby tiles)
+// go ahead of queued background ones (route tiles for the memory card).
+const geoTx = { queue: [], active: null };
+
+function sendChunkedPayload(payloadType, bytes, background = false) {
   const totalChunks = Math.max(1, Math.ceil(bytes.byteLength / BLE_CHUNK_PAYLOAD));
   const tid = (ble.transferId++) & 0xFF;
-  let last = null;
+  const pkts = [];
   for (let c = 0; c < totalChunks; c++) {
     const slice = bytes.subarray(c * BLE_CHUNK_PAYLOAD, (c + 1) * BLE_CHUNK_PAYLOAD);
     const pkt = new Uint8Array(6 + slice.byteLength);
@@ -1593,9 +1821,32 @@ function sendChunkedPayload(payloadType, bytes) {
     dv.setUint16(2, c, true);
     dv.setUint16(4, totalChunks, true);
     pkt.set(slice, 6);
-    last = bleEnqueue(async () => { if (ble.geo) await writeWithResponse(ble.geo, pkt); });
+    pkts.push(pkt);
   }
-  return last;
+  const t = { pkts, background };
+  const firstBg = background ? -1 : geoTx.queue.findIndex((x) => x.background);
+  if (firstBg < 0) geoTx.queue.push(t); else geoTx.queue.splice(firstBg, 0, t);
+  pumpGeo();
+}
+
+function pumpGeo() {
+  if (geoTx.active || !geoTx.queue.length) return;
+  const t = geoTx.active = geoTx.queue.shift();
+  const next = () => {
+    if (!ble.connected || !t.pkts.length) {
+      if (geoTx.active === t) geoTx.active = null;
+      pumpGeo();
+      return;
+    }
+    const pkt = t.pkts.shift();
+    bleEnqueue(async () => { if (ble.geo) await writeWithResponse(ble.geo, pkt); }).then(next);
+  };
+  next();
+}
+
+function resetGeoQueue() {
+  geoTx.queue = [];
+  geoTx.active = null;
 }
 
 // Empty route: the HUD drops back to its "No route" screen
@@ -1635,6 +1886,29 @@ function sendRouteOverBle() {
   sendStreetIfChanged(true);
 }
 
+const tileSig = (payload) => `${payload.byteLength}:${payload.reduce((h, b) => (h * 31 + b) >>> 0, 7)}`;
+
+// Route preload to the HUD's microSD: one corridor tile at a time as a background transfer
+// (telemetry interleaves with its chunks; the route and live tiles go first). Tiles are re-sent only
+// when their content changed (e.g. a neighbouring download added roads crossing into them).
+function pumpSdTiles() {
+  if (!ble.connected || !ble.caps.sd || geoTx.active || geoTx.queue.length || !hudRouteActive()) return;
+  while (mapStore.sdQueue.length) {
+    const key = mapStore.sdQueue.shift();
+    mapStore.sdQueued.delete(key);
+    if (!mapStore.corridorSet.has(key)) continue;
+    const [tx, ty] = key.split(",").map(Number);
+    const payload = buildTilePayload(tx, ty);
+    if (!payload) continue;
+    const sig = tileSig(payload);
+    if (mapStore.sdSent.get(key) === sig) continue;
+    mapStore.sdSent.set(key, sig);
+    sendChunkedPayload(PKT_TILE_STORE, payload, true);
+    if (!mapStore.sdQueue.length) logMsg(`Route map stored on the HUD's memory card (${mapStore.sdSent.size} tiles).`);
+    return;
+  }
+}
+
 // Keeps the 3x3 tile neighbourhood around the player on the HUD (fits the C6's 12-tile LRU)
 function sendTilesAroundPlayer(lat, lon) {
   if (!ble.connected || !state.tileRuns.size || !hudFeedActive()) return;
@@ -1649,7 +1923,7 @@ function sendTilesAroundPlayer(lat, lon) {
       const k = tileKey(tx + dx, ty + dy);
       const payload = buildTilePayload(tx + dx, ty + dy);
       if (!payload) continue;
-      const sig = `${payload.byteLength}:${payload.reduce((h, b) => (h * 31 + b) >>> 0, 7)}`;
+      const sig = tileSig(payload);
       wanted.set(k, sig);
       if (ble.sentTiles.get(k) !== sig) {
         sendChunkedPayload(PKT_ROAD_TILE, payload);
@@ -1686,12 +1960,13 @@ function updateSpeedLimitFromRoads() {
 
 setInterval(() => {
   const { lat, lon } = currentPlayerLatLon();
-  ensureRoadsAround(lat, lon);
+  mapTick(lat, lon);
   updateSpeedLimitFromRoads();
   if (!ble.connected) return;
   sendTelemetry();
   if (hudFeedActive()) sendStreetIfChanged(false);
   sendTilesAroundPlayer(lat, lon);
+  pumpSdTiles();
 }, TELEMETRY_PERIOD_MS);
 
 async function connectGatt() {
@@ -1699,18 +1974,81 @@ async function connectGatt() {
   const service = await server.getPrimaryService(SERVICE_UUID);
   ble.tel = await service.getCharacteristic(CHAR_TELEMETRY_UUID);
   ble.geo = await service.getCharacteristic(CHAR_GEOMETRY_UUID);
+  ble.caps = { sd: false, pak: false };
+  ble.status = null;
+  try { // older firmware has no status characteristic: no memory card, no brightness control
+    ble.status = await service.getCharacteristic(CHAR_STATUS_UUID);
+    applyHudStatus(await ble.status.readValue());
+  } catch { ble.status = null; }
+  ble.pending = 0;
+  resetGeoQueue();
   ble.connected = true;
   ble.reconnectTries = 0;
   ble.queue = Promise.resolve();
   ble.telPending = false;
   updateLinkUi();
-  logMsg(`Connected to ${ble.device.name || "GTA-HUD"} over WebBLE.`);
+  logMsg(`Connected to ${ble.device.name || "GTA-HUD"} over WebBLE` +
+         (ble.caps.sd ? " (memory card: route map will be stored on it)." : " (no memory card: map streams live)."));
   sendRouteOverBle();
+  for (const c of mapStore.corridor) if (mapStore.cells.has(c.key)) queueSdTile(c.key);
 }
+
+// HudStatusPacket: version, flags, max tile bytes, stored tiles, hud mode, brightness %
+function applyHudStatus(v) {
+  const flags = v.getUint8(1);
+  ble.caps = { sd: !!(flags & 1), pak: !!(flags & 2) };
+  if (v.byteLength >= 10) {
+    ble.caps.hudMode = v.getUint8(8) === 1;
+    ble.caps.brightness = v.getUint8(9);
+    if (!bright.dragging && Date.now() - bright.lastSentMs > 3000) showBrightness(ble.caps.brightness);
+  }
+  updateBrightRow();
+}
+
+// ---------- HUD brightness slider (the HUD stores the value for its current mode) ----------
+const bright = { dragging: false, timer: null, sent: -1, lastSentMs: 0 };
+const rngBright = document.getElementById("rngBright");
+
+function showBrightness(pct) {
+  rngBright.value = pct;
+  rngBright.style.setProperty("--p", `${((pct - 5) / 95) * 100}%`);
+  document.getElementById("brightVal").textContent = `${pct}%`;
+}
+
+function updateBrightRow() {
+  const row = document.getElementById("brightRow");
+  row.hidden = !(ble.connected && ble.caps.brightness !== undefined);
+  rngBright.setAttribute("aria-label", ble.caps.hudMode ? "HUD brightness (windshield mode)" : "HUD brightness");
+}
+
+function sendBrightness() {
+  const pct = Number(rngBright.value);
+  if (!ble.connected || pct === bright.sent) return;
+  bright.sent = pct;
+  bright.lastSentMs = Date.now();
+  bleEnqueue(async () => { if (ble.tel) await writeNoResponse(ble.tel, new Uint8Array([PKT_SETTINGS, pct])); });
+}
+
+rngBright.addEventListener("input", () => {
+  bright.dragging = true;
+  showBrightness(Number(rngBright.value));
+  if (!bright.timer) { // live preview on the HUD, at most ~8 writes per second
+    sendBrightness();
+    bright.timer = setTimeout(() => { bright.timer = null; sendBrightness(); }, 120);
+  }
+});
+rngBright.addEventListener("change", () => { bright.dragging = false; sendBrightness(); });
+
+// Re-read the HUD status now and then (brightness/mode can change with the HUD's button)
+setInterval(() => {
+  if (!ble.connected || !ble.status || bright.dragging || ble.pending > 2) return;
+  bleEnqueue(async () => { if (ble.status) applyHudStatus(await ble.status.readValue()); });
+}, 5000);
 
 function onGattDisconnected() {
   ble.connected = false;
-  ble.tel = ble.geo = null;
+  ble.tel = ble.geo = ble.status = null;
+  resetGeoQueue();
   updateLinkUi();
   if (ble.reconnectTries >= 5) {
     logMsg("HUD disconnected. Tap Connect to retry.");
@@ -2158,7 +2496,7 @@ async function planRoute(src, via, dest, opts = {}) {
 
   setNavRoute(simp.pts, maneuvers, route.duration);
   state.hasRealRoute = true;
-  if (!keepOrigin && !roads.center) state.speedLimitMph = 0; // unknown until a road with a maxspeed tag is under the player
+  if (!keepOrigin && !mapStore.cells.has(cellKeyAt(src.lat, src.lon))) state.speedLimitMph = 0; // unknown until a road with a maxspeed tag is under the player
   nav.progressM = 0;
   state.gpsOrigin = true;
   autoDrive = simulating;
@@ -2173,7 +2511,7 @@ async function planRoute(src, via, dest, opts = {}) {
   logMsg(`Route ready: ${fullPts.length} -> ${simp.pts.length} pts (tol ${simp.tol.toFixed(1)} m), ` +
          `${maneuvers.length} maneuvers, ${(nav.total / 1609.34).toFixed(1)} mi, ${Math.round(route.duration / 60)} min.`);
   sendRouteOverBle();
-  if (!keepOrigin) await ensureRoadsAround(src.lat, src.lon);
+  setCorridor(route.geometry.coordinates);
 }
 
 // Installable app (Android share target); network-first so updates show up immediately
@@ -2438,6 +2776,7 @@ function endTrip() {
   pendingTrip = null;
   clearSavedTrip();
   state.hasRealRoute = false;
+  clearCorridor();
   state.routePts = [];
   nav.maneuvers = [];
   nav.cum = [0];
@@ -2486,6 +2825,7 @@ function updateLinkUi() {
   document.getElementById("linkDot").classList.toggle("on", on);
   document.getElementById("btDot").classList.toggle("on", on);
   document.getElementById("linkText").textContent = on ? "HUD connected" : "HUD not connected";
+  updateBrightRow();
 }
 
 // ---------- developer options: simulated drive ----------
@@ -2517,7 +2857,7 @@ function setSimulating(on) {
       nav.maneuvers = [];
       nav.cum = [0];
       nav.total = 0;
-      clearMapCache();
+      restoreRealMap();
       state.maneuverId = 0;
       state.turnDistM = 0;
       state.destDistM = 0;
