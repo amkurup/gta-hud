@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>ESP32 GTA San Andreas HUD — WebBLE Companion & HUD Simulator</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #141821;
+    --border: #262c3a;
+    --gold: #ffb800;
+    --text: #f3f5f8;
+    --muted: #949ba8;
+    --accent: #00e676;
+    --danger: #ff3b30;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+  }
+  header {
+    text-align: center;
+    max-width: 780px;
+  }
+  header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+  }
+  header p {
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .bezel-wrap {
+    background: #050608;
+    border: 2px solid #2b3140;
+    border-radius: 18px;
+    padding: 14px 18px;
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.65);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .bezel-header {
+    width: 480px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  canvas#hudCanvas {
+    width: 480px;
+    height: auto;
+    background: #000000;
+    border-radius: 6px;
+    cursor: pointer;
+    display: block;
+    border: 1px solid #1e222d;
+  }
+  .grid-panels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 16px;
+    width: 100%;
+    max-width: 780px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .card h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--gold);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  button {
+    background: #232938;
+    color: var(--text);
+    border: 1px solid #384157;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: #2e364a; }
+  button.primary {
+    background: var(--gold);
+    color: #090a0d;
+    border-color: var(--gold);
+    font-weight: 600;
+  }
+  button.primary:hover { background: #ffc629; }
+  button.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  label {
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+  }
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--gold);
+  }
+  select {
+    background: #0d1017;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+  input[type="text"] {
+    flex: 1;
+    background: #0d1017;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+  .status-log {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: #9ecbff;
+    background: #090b10;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    height: 92px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ESP32 GTA San Andreas HUD</h1>
+  <p>WebBLE companion (Chrome/Edge, or Bluefy on iOS) + HUD simulator (320x172 or 480x320). Streams route, roads and telemetry to ESP32-C6 / ESP32-S3.</p>
+</header>
+
+<div class="bezel-wrap">
+  <div class="bezel-header">
+    <span id="modeBadge">NORMAL MODE · MAP VIEW</span>
+    <span>CLICK: MAP/TURN VIEW · TOP-RIGHT: HUD MODE</span>
+  </div>
+  <canvas id="hudCanvas" width="320" height="172"></canvas>
+</div>
+
+<div class="grid-panels">
+  <!-- Simulator & Display Controls -->
+  <div class="card">
+    <h2>1. HUD Simulator & Drive Sim</h2>
+    <div class="row">
+      <select id="selDisplay">
+        <option value="compact">Waveshare C6 1.47" (320x172)</option>
+        <option value="full">Hosyond S3 4.0" (480x320)</option>
+      </select>
+    </div>
+    <div class="row">
+      <button id="btnSimDrive" class="primary">Pause Auto-Drive</button>
+      <button id="btnToggleMode">Switch to Turn View</button>
+      <button id="btnMirror">HUD Mode (bright + mirror)</button>
+    </div>
+    <div>
+      <label><span>Vehicle Speed (Finer Near-0 MPH Zoom)</span><span id="lblSpeed">38.0 mph · 1.92 m/px</span></label>
+      <input type="range" id="rngSpeed" min="0" max="80" step="0.5" value="38" />
+    </div>
+    <div>
+      <label><span>Vehicle Heading</span><span id="lblHeading">15°</span></label>
+      <input type="range" id="rngHeading" min="0" max="359" value="15" />
+    </div>
+    <div>
+      <label><span>Route Progress</span><span id="lblProgress">18%</span></label>
+      <input type="range" id="rngProgress" min="0" max="100" value="18" />
+    </div>
+  </div>
+
+  <!-- iPhone Bluefy WebBLE + Source/Destination Routing -->
+  <div class="card">
+    <h2>2. Navigation Route & Bluefy WebBLE</h2>
+    <div class="row">
+      <button id="btnConnectBle" class="primary">Connect HUD (BLE)</button>
+      <button id="btnUseCurrentLoc">Use Current Location (GPS)</button>
+      <button id="btnLiveGpsTrack">Live GPS Tracking: Off</button>
+    </div>
+    <div>
+      <label for="inpStart"><span>Source (Address, Place, or lat,lon)</span><span id="lblSourceCoords"></span></label>
+      <div class="row" style="margin-top: 4px;">
+        <input type="text" id="inpStart" value="" placeholder="Enter source address or click 'Use Current Location'" />
+      </div>
+    </div>
+    <div>
+      <label for="inpDest"><span>Destination (Address, Place, or lat,lon)</span><span id="lblDestCoords"></span></label>
+      <div class="row" style="margin-top: 4px;">
+        <input type="text" id="inpDest" value="" placeholder="Enter destination address or place..." />
+        <button id="btnFetchReal" class="primary">Get Route & Roads</button>
+      </div>
+    </div>
+    <div class="status-log" id="statusLog">Ready. Enter a Source (or click Use Current Location) and a Destination.</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ============================================================================
+// Protocol constants (must match src/ble_protocol.h)
+// ============================================================================
+const SERVICE_UUID        = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const CHAR_TELEMETRY_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const CHAR_GEOMETRY_UUID  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const PKT_TELEMETRY = 0x01, PKT_STREET_NAME = 0x02, PKT_ROUTE_POLYLINE = 0x10, PKT_ROAD_TILE = 0x20;
+const TILE_LON_E7 = 50000, TILE_LAT_E7 = 45000;
+const M_PER_DEG_LAT = 111132.92;
+const mPerDegLonAt = (latDeg) => 111412.84 * Math.cos((latDeg * Math.PI) / 180);
+
+// Limits of the smallest target (ESP32-C6): MAX_ROUTE_VERTICES and REASSEMBLY_BUF_SIZE
+const DEVICE_MAX_ROUTE_VERTS = 512;
+const DEVICE_MAX_TILE_BYTES  = 8000;
+// iOS typically negotiates MTU 185 -> 182-byte ATT payload; 6-byte chunk header + 176 data
+const BLE_CHUNK_PAYLOAD = 176;
+const TELEMETRY_PERIOD_MS = 200;
+
+const canvas = document.getElementById("hudCanvas");
+const ctx = canvas.getContext("2d");
+
+let displayMode = 0; // 0 = Mode A (GTA Map), 1 = Mode B (Full-Screen Turn Arrow)
+let autoDrive = true;
+let smoothedScale = 1.35;
+
+// Shared state matching the firmware's HudRuntimeState
+const state = {
+  originLat: 42.3314,
+  originLon: -83.0458,
+  playerX: 5,
+  playerY: -35,
+  headingDeg: 15,
+  speedMph: 38,
+  speedLimitMph: 40,
+  maneuverId: 7,
+  turnDistM: 482,
+  destDistM: 4988,
+  etaMinutes: 8,
+  streetName: "Woodward Ave",
+  nextWpIdx: 5,
+  closestRouteIdx: 1,
+  routePts: [],
+  ways: [],          // { tier, pts: [{x,y}] } in session meters (for the simulator)
+  tileRuns: new Map(), // "tx,ty" -> [{ tier, ll: [[lat,lon],...] }] (for streaming to the HUD)
+  hasRealRoute: false
+};
+
+// Along-route navigation model
+const nav = { cum: [0], total: 0, durationS: 0, maneuvers: [], progressM: 0, segIdx: 0 };
+
+function logMsg(msg) {
+  const el = document.getElementById("statusLog");
+  const ts = new Date().toLocaleTimeString();
+  el.textContent = `[${ts}] ${msg}\n` + el.textContent;
+}
+
+// ============================================================================
+// Built-in demo city (matches the firmware's loadBuiltInDemoCityGrid)
+// ============================================================================
+function buildDemoGrid() {
+  state.ways = [];
+  for (let i = -8; i <= 8; i++) {
+    const y = i * 55;
+    state.ways.push({ tier: (i === 0 || i === 3) ? 2 : 1, pts: [{ x: -500, y: y - i * 8 }, { x: 500, y: y + i * 12 }] });
+  }
+  for (let i = -8; i <= 8; i++) {
+    const x = i * 55;
+    state.ways.push({ tier: (i === -1 || i === 2) ? 2 : 1, pts: [{ x: x - 15, y: -500 }, { x: x + 25, y: 550 }] });
+  }
+  state.ways.push(
+    { tier: 3, pts: [{ x: -450, y: -320 }, { x: 390, y: 490 }] },
+    { tier: 3, pts: [{ x: -460, y: 130 }, { x: 430, y: 410 }] },
+    { tier: 2, pts: [{ x: -20, y: -380 }, { x: 125, y: 470 }] },
+    { tier: 2, pts: [{ x: -290, y: -380 }, { x: -65, y: 440 }] },
+    { tier: 2, pts: [{ x: 210, y: -360 }, { x: -160, y: 400 }] }
+  );
+  // Stream the same grid to the HUD as real tiles (the device drops its own demo grid on route upload)
+  const mLon = mPerDegLonAt(state.originLat);
+  state.tileRuns = indexWaysIntoTiles(state.ways.map((w) => ({
+    tier: w.tier,
+    ll: w.pts.map((p) => [state.originLat + p.y / M_PER_DEG_LAT, state.originLon + p.x / mLon])
+  })));
+}
+
+function loadDemoRoute() {
+  const pts = [
+    { x: 0, y: -160 }, { x: 0, y: -45 }, { x: 4, y: 35 }, { x: 24, y: 95 }, { x: 20, y: 145 },
+    { x: 74, y: 162 }, { x: 88, y: 235 }, { x: 105, y: 295 }, { x: 132, y: 315 }, { x: 122, y: 390 }
+  ];
+  setNavRoute(pts, [
+    { idx: 5, id: 7, name: "Woodward Ave" },
+    { idx: 9, id: 9, name: "Destination" }
+  ], 0);
+  nav.progressM = nav.total * 0.18;
+}
+
+// ============================================================================
+// Navigation model: cumulative distance, progress, next maneuver, ETA
+// ============================================================================
+function setNavRoute(pts, maneuvers, durationS) {
+  state.routePts = pts;
+  nav.cum = [0];
+  for (let i = 1; i < pts.length; i++) {
+    nav.cum.push(nav.cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+  }
+  nav.total = nav.cum[nav.cum.length - 1] || 0;
+  nav.durationS = durationS > 0 ? durationS : nav.total / 13.4;
+  nav.maneuvers = maneuvers.length ? maneuvers : [{ idx: pts.length - 1, id: 9, name: "Destination" }];
+  nav.progressM = 0;
+  nav.segIdx = 0;
+}
+
+function positionAtProgress(d) {
+  const pts = state.routePts;
+  d = Math.max(0, Math.min(nav.total, d));
+  let i = Math.min(nav.segIdx, pts.length - 2);
+  while (i > 0 && nav.cum[i] > d) i--;
+  while (i < pts.length - 2 && nav.cum[i + 1] < d) i++;
+  const segLen = nav.cum[i + 1] - nav.cum[i] || 1;
+  const t = (d - nav.cum[i]) / segLen;
+  return {
+    seg: i,
+    x: pts[i].x + (pts[i + 1].x - pts[i].x) * t,
+    y: pts[i].y + (pts[i + 1].y - pts[i].y) * t,
+    headingDeg: ((Math.atan2(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y) * 180) / Math.PI + 360) % 360
+  };
+}
+
+// Map-match a free position (GPS) onto the route near the previous progress
+function locateOnRoute(x, y) {
+  const pts = state.routePts;
+  if (pts.length < 2) return;
+  const search = (from, to) => {
+    let best = { d2: Infinity, seg: nav.segIdx, along: nav.progressM };
+    for (let i = Math.max(0, from); i < Math.min(pts.length - 1, to); i++) {
+      const ax = pts[i].x, ay = pts[i].y, bx = pts[i + 1].x, by = pts[i + 1].y;
+      const sx = bx - ax, sy = by - ay;
+      const len2 = sx * sx + sy * sy || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * sx + (y - ay) * sy) / len2));
+      const px = ax + sx * t, py = ay + sy * t;
+      const d2 = (x - px) ** 2 + (y - py) ** 2;
+      if (d2 < best.d2) best = { d2, seg: i, along: nav.cum[i] + Math.sqrt(len2) * t };
+    }
+    return best;
+  };
+  let best = search(nav.segIdx - 3, nav.segIdx + 60);
+  if (best.d2 > 80 * 80) best = search(0, pts.length - 1); // off-route or jumped: global search
+  nav.segIdx = best.seg;
+  nav.progressM = best.along;
+}
+
+function updateNavDerivedState() {
+  const pts = state.routePts;
+  if (pts.length < 2) return;
+  const p = nav.progressM;
+  state.closestRouteIdx = Math.min(pts.length - 1, nav.segIdx + 1);
+  const next = nav.maneuvers.find((m) => nav.cum[m.idx] > p + 2) || nav.maneuvers[nav.maneuvers.length - 1];
+  state.maneuverId = next.id;
+  state.nextWpIdx = next.idx;
+  state.streetName = (next.name || "").slice(0, 31);
+  state.turnDistM = Math.max(0, Math.round(nav.cum[next.idx] - p));
+  state.destDistM = Math.max(0, Math.round(nav.total - p));
+  const remainingS = nav.total > 0 ? nav.durationS * (state.destDistM / nav.total) : 0;
+  state.etaMinutes = state.destDistM > 30 ? Math.max(1, Math.round(remainingS / 60)) : 0;
+}
+
+// ============================================================================
+// Rendering — mirrors the firmware (src/ui_gta_map.cpp, src/ui_turn_hud.cpp, src/gta_sprites.h)
+// ============================================================================
+const THEMES = {
+  normal: {
+    light: false, mapBg: "#08080A", colBg: "#000000", rgbBg: "0,0,0",
+    textMain: "#FFFFFF", textMuted: "#C8CCD4", textEta: "#00E5FF",
+    casings: true, roadLocal: "#4A505C", artCasing: "#181A20", artCore: "#7A8291", hwyCasing: "#101216", hwyCore: "#9BA3B5",
+    routeCasing: "#000000", routeCore: "#FFB800",
+    playerFill: "#FFFFFF", playerOutline: "#000000",
+    blipOutline: "#000000", blipRed: "#E52521", blipYellow: "#FFD700",
+    destRing: "#FFB800", destGap: "#000000", destCore: "#FFB800",
+    northBg: "#000000", northFg: "#FFFFFF", barTrack: "#2A2E36", speedoFill: "#FFFFFF", blurTint: 140 / 256
+  },
+  hud: { // pure black reflects as clear glass on the windshield; only bright content shows
+    light: false, mapBg: "#000000", colBg: "#000000", rgbBg: "0,0,0",
+    textMain: "#FFFFFF", textMuted: "#FFFFFF", textEta: "#00E5FF",
+    casings: false, roadLocal: "#8C8C8C", artCasing: "#000000", artCore: "#FFFFFF", hwyCasing: "#000000", hwyCore: "#FFFFFF",
+    routeCasing: "#000000", routeCore: "#00FF40",
+    playerFill: "#FF1A1A", playerOutline: "#000000",
+    blipOutline: "#000000", blipRed: "#FF1744", blipYellow: "#FFEA00",
+    destRing: "#FFFFFF", destGap: "#000000", destCore: "#00FF40",
+    northBg: "#000000", northFg: "#FFFFFF", barTrack: "#333333", speedoFill: "#00FF40", blurTint: 140 / 256
+  }
+};
+const LINK_OK = "#00E676", LINK_DOWN = "#FF1744", HUD_GREEN = "#00FF40";
+let hudMode = false; // Normal (dark A / B3) vs HUD (black + bright A1 / B1, mirrored)
+const theme = () => (hudMode ? THEMES.hud : THEMES.normal);
+
+// Pixel positions copied from initGtaMapRenderer() / initTurnHudRenderer()
+const LAYOUTS = {
+  compact: { // Waveshare ESP32-C6-LCD-1.47
+    w: 320, h: 172, vignette: 10, zoomMult: 1.4, roadWidthMult: 0.8,
+    playerX: 172, playerY: 124, clampX0: 112, clampX1: 244, blipMargin: 13,
+    infoX: 46, arrowY: 28, arrowSize: 46, distY: 64, distPx: 21, streetY: 86, streetPx: 12, infoMaxW: 90,
+    leftFadeW: 112, leftFadeH: 104,
+    speedoX: 48, speedoY: 136, speedoR: 24, speedoHalfW: 2, speedoNumPx: 17, speedoMphPx: 8, blurR: 38, blurPx: 7,
+    etaX: 290, etaNumY: 118, etaNumPx: 38, etaUnitY: 146, etaDistY: 163, etaSmallPx: 13,
+    rightFadeX: 244, rightFadeY: 88, dotX: 310, dotY: 10, dotR: 5,
+    turn: { arrowX: 78, arrowY: 90, arrowSize: 140, numX: 236, numY: 48, numPx: 48, unitY: 86, unitPx: 21,
+            streetY: 114, streetPx: 13, streetMaxW: 152, barX: 160, barY: 128, barW: 152, barH: 8,
+            etaX: 314, etaY: 169, etaPx: 13, sepR: 2 }
+  },
+  full: { // Hosyond 4.0" ESP32-S3
+    w: 480, h: 320, vignette: 16, zoomMult: 1.0, roadWidthMult: 1.0,
+    playerX: 258, playerY: 230, clampX0: 168, clampX1: 362, blipMargin: 22,
+    infoX: 72, arrowY: 52, arrowSize: 84, distY: 120, distPx: 26, streetY: 152, streetPx: 13, infoMaxW: 136,
+    leftFadeW: 168, leftFadeH: 180,
+    speedoX: 74, speedoY: 250, speedoR: 40, speedoHalfW: 3, speedoNumPx: 26, speedoMphPx: 12, blurR: 60, blurPx: 11,
+    etaX: 428, etaNumY: 212, etaNumPx: 58, etaUnitY: 256, etaDistY: 290, etaSmallPx: 17,
+    rightFadeX: 362, rightFadeY: 166, dotX: 464, dotY: 16, dotR: 7,
+    turn: { arrowX: 120, arrowY: 165, arrowSize: 230, numX: 354, numY: 88, numPx: 72, unitY: 150, unitPx: 34,
+            streetY: 198, streetPx: 17, streetMaxW: 228, barX: 240, barY: 222, barW: 228, barH: 12,
+            etaX: 472, etaY: 314, etaPx: 17, sepR: 3 }
+  }
+};
+let L = LAYOUTS.compact;
+
+// Frames are drawn unmirrored into an offscreen canvas, then copied to the visible canvas
+// (mirrored in HUD mode, like the panel's MADCTL flip)
+const frameCanvas = document.createElement("canvas");
+const fx = frameCanvas.getContext("2d");
+const fadeCache = new Map();
+
+function setLayout(name) {
+  L = LAYOUTS[name];
+  canvas.width = frameCanvas.width = L.w;
+  canvas.height = frameCanvas.height = L.h;
+  fadeCache.clear();
+}
+
+const FONT = "-apple-system, 'Helvetica Neue', Arial, sans-serif";
+function txt(s, x, y, px, col, align = "center", weight = 700, base = "middle", maxW) {
+  fx.font = `${weight} ${px}px ${FONT}`;
+  fx.fillStyle = col;
+  fx.textAlign = align;
+  fx.textBaseline = base;
+  if (maxW && fx.measureText(s).width > maxW) {
+    while (s.length > 1 && fx.measureText(s + "..").width > maxW) s = s.slice(0, -1);
+    s += "..";
+  }
+  fx.fillText(s, x, y);
+}
+
+function computeZoomScale(speedMph, turnDistM, dt) {
+  //   0 mph -> 0.38 m/px, 8 mph -> 0.68, 20 mph -> 1.10, 45 mph -> 2.20, 80 mph -> 4.00
+  let target = 0.38;
+  if (speedMph <= 8.0) {
+    const t = Math.max(0, speedMph) / 8.0;
+    target = 0.38 + (0.68 - 0.38) * (t * (0.35 + 0.65 * t));
+  } else if (speedMph <= 20.0) {
+    target = 0.68 + ((speedMph - 8.0) / 12.0) * (1.10 - 0.68);
+  } else if (speedMph <= 45.0) {
+    target = 1.10 + ((speedMph - 20.0) / 25.0) * (2.20 - 1.10);
+  } else {
+    const clamped = Math.min(speedMph, 80.0);
+    target = 2.20 + ((clamped - 45.0) / 35.0) * (4.00 - 2.20);
+  }
+  if (turnDistM < 180) {
+    const w = Math.max(0, (180 - turnDistM) / 180);
+    const closeTurnScale = speedMph < 10 ? 0.45 : 0.80;
+    target = Math.min(target, target * (1 - w) + closeTurnScale * w);
+  }
+  // Frame-rate independent smoothing (~0.06 per 33 ms frame, same as the firmware)
+  smoothedScale += (target - smoothedScale) * (1 - Math.exp(-dt * 1.9));
+  return smoothedScale;
+}
+
+function makeProjector(rad, invScale) {
+  const cosH = Math.cos(rad) * invScale;
+  const sinH = Math.sin(rad) * invScale;
+  const px = state.playerX, py = state.playerY;
+  return (wx, wy) => {
+    const dx = wx - px, dy = wy - py;
+    return { x: L.playerX + (dx * cosH - dy * sinH), y: L.playerY - (dx * sinH + dy * cosH) };
+  };
+}
+
+// Off-screen blips are pulled onto the edge of the band between the overlays
+function clampToPerimeter(pt) {
+  const minX = L.clampX0, maxX = L.clampX1, minY = L.blipMargin, maxY = L.h - L.blipMargin;
+  if (pt.x >= minX && pt.x <= maxX && pt.y >= minY && pt.y <= maxY) return { x: pt.x, y: pt.y, clamped: false };
+  const vx = pt.x - L.playerX, vy = pt.y - L.playerY;
+  const tx = vx > 0 ? (maxX - L.playerX) / vx : (vx < 0 ? (minX - L.playerX) / vx : 1e9);
+  const ty = vy > 0 ? (maxY - L.playerY) / vy : (vy < 0 ? (minY - L.playerY) / vy : 1e9);
+  const t = Math.min(tx, ty);
+  return { x: L.playerX + vx * t, y: L.playerY + vy * t, clamped: true };
+}
+
+function turnArrowColor(turnDistM) {
+  if (hudMode) return HUD_GREEN;
+  if (turnDistM < 100) return "#00E676";
+  if (turnDistM < 300) return "#FFD600";
+  return "#FFFFFF";
+}
+
+// Tapered body + notched chevron head, built from the same turtle path as drawManeuverArrow()
+const ARROW_PATHS = {
+  2: [[0.55, 0], [0.30, 45], [0.45, 0]],   // slight (mirrored for left)
+  3: [[0.55, 0], [0.24, 90], [0.42, 0]],   // left/right
+  4: [[0.62, 0], [0.20, 135], [0.22, 0]],  // sharp
+  5: [[0.55, 0], [-0.22, 180], [0.30, 0]], // U-turn (left)
+  1: [[1.0, 0]]                            // straight
+};
+function drawManeuverArrow(cx, cy, size, id, col, bg) {
+  if (id === 9) { // arrive: map pin with a hole
+    const r = size * 0.28, py = cy - size * 0.12;
+    fx.fillStyle = col;
+    fx.beginPath(); fx.arc(cx, py, r, 0, Math.PI * 2); fx.fill();
+    fx.beginPath(); fx.moveTo(cx - r * 0.81, py + r * 0.59); fx.lineTo(cx + r * 0.81, py + r * 0.59); fx.lineTo(cx, py + r * 2.1); fx.fill();
+    fx.fillStyle = bg; fx.beginPath(); fx.arc(cx, py, r * 0.4, 0, Math.PI * 2); fx.fill();
+    return;
+  }
+  const mirror = id === 2 || id === 3 || id === 4;
+  const key = { 2: 2, 6: 2, 3: 3, 7: 3, 4: 4, 8: 4, 5: 5 }[id] || 1;
+  let x = 0, y = 0, h = -Math.PI / 2;
+  const pts = [[0, 0]];
+  for (const [a, deg] of ARROW_PATHS[key]) {
+    if (!deg) { x += Math.cos(h) * a; y += Math.sin(h) * a; pts.push([x, y]); continue; }
+    const r = Math.abs(a), dir = a < 0 ? -1 : 1, steps = Math.max(6, Math.round(deg / 10));
+    const dh = ((deg * Math.PI) / 180 / steps) * dir, step = 2 * r * Math.sin(Math.abs(dh) / 2);
+    for (let i = 0; i < steps; i++) { const hm = h + dh / 2; x += Math.cos(hm) * step; y += Math.sin(hm) * step; h += dh; pts.push([x, y]); }
+  }
+  if (mirror) { pts.forEach((p) => (p[0] = -p[0])); h = Math.PI - h; }
+  const HL = 0.441, HW = 0.414, NOTCH = 0.35, ch = Math.cos(h), sh = Math.sin(h);
+  const [tx, ty] = pts[pts.length - 1];
+  const all = pts.concat([[tx + ch * HL, ty + sh * HL], [tx - sh * HW, ty + ch * HW], [tx + sh * HW, ty - ch * HW]]);
+  const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const sc = size / Math.max(x1 - x0, y1 - y0, 1e-3);
+  const ox = cx - ((x0 + x1) / 2) * sc, oy = cy - ((y0 + y1) / 2) * sc;
+  const S = ([px, py]) => [ox + px * sc, oy + py * sc];
+  fx.strokeStyle = col; fx.fillStyle = col; fx.lineCap = "round";
+  for (let i = 0; i < pts.length - 1; i++) {
+    const t = (i + 0.5) / (pts.length - 1);
+    fx.lineWidth = Math.max(2, (0.07 + 0.15 * t) * sc);
+    const [ax, ay] = S(pts[i]), [bx, by] = S(pts[i + 1]);
+    fx.beginPath(); fx.moveTo(ax, ay); fx.lineTo(bx, by); fx.stroke();
+  }
+  const tip = S([tx + ch * HL, ty + sh * HL]), lw = S([tx - sh * HW, ty + ch * HW]);
+  const rw = S([tx + sh * HW, ty - ch * HW]), nt = S([tx + ch * HL * NOTCH, ty + sh * HL * NOTCH]);
+  fx.beginPath(); fx.moveTo(...tip); fx.lineTo(...lw); fx.lineTo(...nt); fx.lineTo(...rw); fx.closePath(); fx.fill();
+}
+
+function drawLinkDot(x, y, r) {
+  if (theme().light) { fx.fillStyle = "#000"; fx.beginPath(); fx.arc(x, y, r + 1, 0, Math.PI * 2); fx.fill(); }
+  fx.fillStyle = ble.connected ? LINK_OK : LINK_DOWN;
+  fx.beginPath(); fx.arc(x, y, r, 0, Math.PI * 2); fx.fill();
+}
+
+function formatTurnDist(m, roundFt) {
+  const mi = m / 1609.34;
+  return mi >= 0.1 ? `${mi.toFixed(1)} mi` : `${Math.round((m * 3.28084) / roundFt) * roundFt} ft`;
+}
+
+// "8" + "min", "1:05" + "hr" (formatEtaParts)
+function etaParts() {
+  if (state.destDistM < 30) return ["0", "min"];
+  const m = state.etaMinutes;
+  if (m >= 60) return [`${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`, "hr"];
+  return [`${Math.max(1, m)}`, "min"];
+}
+
+// Soft backdrop behind floating text (applyOverlayFade): opacity 92% -> 75% -> 0% from the
+// screen edge inward, tapering over 18 px on the open vertical edge. Cached per layout/theme.
+function overlayFade(fw, fh, fromLeft, taperBottom) {
+  const key = `${L.w}:${hudMode}:${fw}:${fh}:${fromLeft}`;
+  if (fadeCache.has(key)) return fadeCache.get(key);
+  const c = document.createElement("canvas"); c.width = fw; c.height = fh;
+  const g = c.getContext("2d"), rgb = theme().rgbBg;
+  const hg = g.createLinearGradient(fromLeft ? 0 : fw, 0, fromLeft ? fw : 0, 0);
+  hg.addColorStop(0, `rgba(${rgb},0.92)`); hg.addColorStop(0.55, `rgba(${rgb},0.75)`); hg.addColorStop(1, `rgba(${rgb},0)`);
+  g.fillStyle = hg; g.fillRect(0, 0, fw, fh);
+  g.globalCompositeOperation = "destination-in";
+  const vg = g.createLinearGradient(0, taperBottom ? fh : 0, 0, taperBottom ? fh - 18 : 18);
+  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,1)");
+  g.fillStyle = vg; g.fillRect(0, 0, fw, fh);
+  fadeCache.set(key, c);
+  return c;
+}
+
+// Heavy blur + tint disc behind the speedometer, feathered over the outer 4 px (applyBlurDisc)
+const blurCanvas = document.createElement("canvas");
+function blurDisc(cx, cy, R) {
+  const d = 2 * R + 2, th = theme();
+  blurCanvas.width = blurCanvas.height = d;
+  const g = blurCanvas.getContext("2d");
+  g.filter = `blur(${L.blurPx}px)`;
+  g.drawImage(frameCanvas, cx - R - 1, cy - R - 1, d, d, 0, 0, d, d);
+  g.filter = "none";
+  g.fillStyle = `rgba(${th.rgbBg},${th.blurTint})`; g.fillRect(0, 0, d, d);
+  g.globalCompositeOperation = "destination-in";
+  const rg = g.createRadialGradient(R + 1, R + 1, R - 4, R + 1, R + 1, R);
+  rg.addColorStop(0, "rgba(0,0,0,1)"); rg.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = rg; g.fillRect(0, 0, d, d);
+  fx.drawImage(blurCanvas, cx - R - 1, cy - R - 1);
+}
+
+function edgeVignette() {
+  const v = L.vignette, rgb = theme().rgbBg;
+  const side = (x0, y0, x1, y1, rx, ry, rw, rh) => {
+    const g = fx.createLinearGradient(x0, y0, x1, y1);
+    g.addColorStop(0, `rgba(${rgb},1)`); g.addColorStop(1, `rgba(${rgb},0)`);
+    fx.fillStyle = g; fx.fillRect(rx, ry, rw, rh);
+  };
+  side(0, 0, v, 0, 0, 0, v, L.h);
+  side(L.w, 0, L.w - v, 0, L.w - v, 0, v, L.h);
+  side(0, 0, 0, v, 0, 0, L.w, v);
+  side(0, L.h, 0, L.h - v, 0, L.h - v, L.w, v);
+}
+
+// Mini speedometer: 270-degree arc (0..80 mph), red tick at the current road's limit
+function miniSpeedo(cx, cy, r) {
+  const th = theme(), a0 = Math.PI * 0.75, sweep = Math.PI * 1.5, max = 80;
+  const mph = Math.round(state.speedMph), limit = state.speedLimitMph;
+  fx.lineWidth = L.speedoHalfW * 2 + 1;
+  fx.lineCap = "butt"; fx.strokeStyle = th.barTrack;
+  fx.beginPath(); fx.arc(cx, cy, r, a0, a0 + sweep); fx.stroke();
+  const frac = Math.min(1, mph / max);
+  if (frac > 0.005) {
+    fx.lineCap = "round";
+    fx.strokeStyle = limit > 0 && mph > limit + 5 ? LINK_DOWN : th.speedoFill;
+    fx.beginPath(); fx.arc(cx, cy, r, a0, a0 + sweep * frac); fx.stroke();
+  }
+  if (limit > 0) {
+    const la = a0 + sweep * Math.min(1, limit / max), inner = r - L.speedoHalfW - 4, outer = r + L.speedoHalfW + 4;
+    fx.strokeStyle = LINK_DOWN; fx.lineWidth = L.w > 400 ? 4 : 3; fx.lineCap = "round";
+    fx.beginPath(); fx.moveTo(cx + Math.cos(la) * inner, cy + Math.sin(la) * inner);
+    fx.lineTo(cx + Math.cos(la) * outer, cy + Math.sin(la) * outer); fx.stroke();
+  }
+  txt(`${mph}`, cx, cy, L.speedoNumPx, th.textMain, "center", 800);
+  txt("mph", cx, cy + r - (L.w > 400 ? 4 : 3), L.speedoMphPx, th.textMuted, "center", 600);
+}
+
+function renderModeA(dt) {
+  const th = theme();
+  const baseScale = computeZoomScale(state.speedMph, state.turnDistM, dt);
+  const scale = baseScale * L.zoomMult;
+  const rad = (state.headingDeg * Math.PI) / 180.0;
+  const widthBoost = Math.min(2.15, Math.max(0.85, Math.pow(1.1 / baseScale, 0.55))) * L.roadWidthMult;
+  const project = makeProjector(rad, 1.0 / scale);
+  document.getElementById("lblSpeed").textContent =
+    `${state.speedMph.toFixed(1)} mph · ${scale.toFixed(2)} m/px (${Math.round((L.playerY) * scale)}m ahead)`;
+
+  fx.fillStyle = th.mapBg; fx.fillRect(0, 0, L.w, L.h);
+  fx.lineCap = "round"; fx.lineJoin = "round";
+  const stroke = (pts) => {
+    fx.beginPath();
+    pts.forEach((pt, i) => { const s = project(pt.x, pt.y); if (i) fx.lineTo(s.x, s.y); else fx.moveTo(s.x, s.y); });
+    fx.stroke();
+  };
+  if (th.casings) {
+    for (const way of state.ways) {
+      if (way.tier < 2 || way.pts.length < 2) continue;
+      fx.strokeStyle = way.tier === 3 ? th.hwyCasing : th.artCasing;
+      fx.lineWidth = (way.tier === 3 ? 10 : 8) * widthBoost;
+      stroke(way.pts);
+    }
+  }
+  for (const way of state.ways) {
+    if (way.pts.length < 2) continue;
+    fx.strokeStyle = way.tier === 3 ? th.hwyCore : (way.tier === 2 ? th.artCore : th.roadLocal);
+    fx.lineWidth = (way.tier === 3 ? 7 : (way.tier === 2 ? 5 : 3)) * widthBoost;
+    stroke(way.pts);
+  }
+  if (state.routePts.length >= 2) {
+    const route = [{ x: state.playerX, y: state.playerY }, ...state.routePts.slice(state.closestRouteIdx)];
+    fx.strokeStyle = th.routeCasing; fx.lineWidth = 9 * widthBoost; stroke(route);
+    fx.strokeStyle = th.routeCore; fx.lineWidth = 5 * widthBoost; stroke(route);
+  }
+
+  // Blips (no text on the map)
+  if (state.routePts.length >= 2) {
+    const last = state.routePts.length - 1;
+    if (state.nextWpIdx < last) {
+      const p = state.routePts[state.nextWpIdx], s = clampToPerimeter(project(p.x, p.y));
+      fx.fillStyle = th.blipOutline; fx.fillRect(s.x - 8, s.y - 8, 17, 17);
+      fx.fillStyle = th.blipRed; fx.fillRect(s.x - 6, s.y - 6, 13, 13);
+      fx.fillStyle = th.blipYellow; fx.fillRect(s.x - 3, s.y - 3, 7, 7);
+    }
+    const p = state.routePts[last], s = clampToPerimeter(project(p.x, p.y));
+    for (const [r, c] of [[10, th.blipOutline], [8, th.destRing], [6, th.destGap], [4, th.destCore]]) {
+      fx.fillStyle = c; fx.beginPath(); fx.arc(s.x, s.y, r, 0, Math.PI * 2); fx.fill();
+    }
+  }
+  const n = clampToPerimeter({ x: L.playerX - Math.sin(rad) * 1000, y: L.playerY - Math.cos(rad) * 1000 });
+  fx.fillStyle = th.northBg; fx.beginPath(); fx.arc(n.x, n.y, 10, 0, Math.PI * 2); fx.fill();
+  fx.strokeStyle = th.northFg; fx.lineWidth = 1.5; fx.beginPath(); fx.arc(n.x, n.y, 9, 0, Math.PI * 2); fx.stroke();
+  txt("N", n.x, n.y + 0.5, 11, th.northFg, "center", 800);
+
+  const px = L.playerX, py = L.playerY;
+  fx.fillStyle = th.playerOutline;
+  fx.beginPath(); fx.moveTo(px, py - 13); fx.lineTo(px - 11, py + 11); fx.lineTo(px + 11, py + 11); fx.fill();
+  fx.fillStyle = th.playerFill;
+  fx.beginPath(); fx.moveTo(px, py - 9); fx.lineTo(px - 7, py + 7); fx.lineTo(px, py + 3); fx.lineTo(px + 7, py + 7); fx.fill();
+
+  // Backdrops for the floating overlays
+  edgeVignette();
+  fx.drawImage(overlayFade(L.leftFadeW, L.leftFadeH, true, true), 0, 0);
+  fx.drawImage(overlayFade(L.w - L.rightFadeX, L.h - L.rightFadeY, false, false), L.rightFadeX, L.rightFadeY);
+  blurDisc(L.speedoX, L.speedoY, L.blurR);
+
+  // Top-left: turn arrow, distance, street
+  drawManeuverArrow(L.infoX, L.arrowY, L.arrowSize, state.maneuverId, hudMode ? HUD_GREEN : (th.light ? "#000" : "#FFF"), th.colBg);
+  txt(formatTurnDist(state.turnDistM, 50), L.infoX, L.distY, L.distPx, th.textMain, "center", 800, "middle", L.infoMaxW);
+  txt(state.streetName, L.infoX, L.streetY, L.streetPx, th.textMuted, "center", 700, "middle", L.infoMaxW);
+
+  miniSpeedo(L.speedoX, L.speedoY, L.speedoR);
+
+  // Right: time remaining + destination distance
+  const [num, unit] = etaParts();
+  txt(num, L.etaX, L.etaNumY, L.etaNumPx, th.textEta, "center", 800);
+  txt(unit, L.etaX, L.etaUnitY, L.etaSmallPx, th.textEta, "center", 800);
+  txt(`${(state.destDistM / 1609.34).toFixed(1)} mi`, L.etaX, L.etaDistY, L.etaSmallPx, th.textEta, "center", 800);
+
+  drawLinkDot(L.dotX, L.dotY, L.dotR);
+}
+
+function renderModeB() {
+  const th = theme(), T = L.turn, accent = turnArrowColor(state.turnDistM);
+  fx.fillStyle = th.colBg; fx.fillRect(0, 0, L.w, L.h);
+  drawManeuverArrow(T.arrowX, T.arrowY, T.arrowSize, state.maneuverId, accent, th.colBg);
+
+  if (state.maneuverId === 9 && state.turnDistM < 30) {
+    txt("Arrived", T.numX, T.numY + 10, T.unitPx * 1.2, th.textMain, "center", 800);
+  } else {
+    const mi = state.turnDistM / 1609.34;
+    const [num, unit] = mi >= 0.1
+      ? [mi >= 10 ? mi.toFixed(0) : mi.toFixed(1), "mi"]
+      : [`${Math.round((state.turnDistM * 3.28084) / 25) * 25}`, "ft"];
+    txt(num, T.numX, T.numY, T.numPx, th.textMain, "center", 800);
+    txt(unit, T.numX, T.unitY, T.unitPx, th.textMain, "center", 700);
+  }
+  txt(state.streetName, T.numX, T.streetY, T.streetPx, th.light ? th.textMain : "#FFD600", "center", 800, "middle", T.streetMaxW);
+
+  const prog = 1.0 - Math.min(1.0, state.turnDistM / 500.0);
+  fx.fillStyle = th.barTrack;
+  fx.beginPath(); fx.roundRect(T.barX, T.barY, T.barW, T.barH, T.barH / 2); fx.fill();
+  if (T.barW * prog >= T.barH) {
+    fx.fillStyle = accent;
+    fx.beginPath(); fx.roundRect(T.barX, T.barY, T.barW * prog, T.barH, T.barH / 2); fx.fill();
+  }
+
+  // Bottom-right: "8 min . 3.1 mi"
+  const [num, unit] = etaParts();
+  const dest = `${(state.destDistM / 1609.34).toFixed(1)} mi`;
+  txt(dest, T.etaX, T.etaY, T.etaPx, th.textEta, "right", 800, "bottom");
+  const sepX = T.etaX - fx.measureText(dest).width - 4 * T.sepR;
+  fx.fillStyle = th.textEta; fx.beginPath(); fx.arc(sepX, T.etaY - T.etaPx * 0.4, T.sepR, 0, Math.PI * 2); fx.fill();
+  txt(`${num} ${unit}`, sepX - 4 * T.sepR, T.etaY, T.etaPx, th.textEta, "right", 800, "bottom");
+
+  drawLinkDot(L.dotX, L.dotY, L.dotR);
+}
+
+// ============================================================================
+// Drive simulation (distance-based, frame-rate independent)
+// ============================================================================
+function updateSimulation(dt) {
+  if (gpsWatchId !== null || state.routePts.length < 2) {
+    updateNavDerivedState();
+    return;
+  }
+  if (autoDrive) {
+    nav.progressM += (Math.max(3, state.speedMph) / 2.23694) * dt;
+    if (nav.progressM >= nav.total) nav.progressM = 0;
+  } else {
+    nav.progressM = (Number(document.getElementById("rngProgress").value) / 100.0) * nav.total;
+  }
+  const pos = positionAtProgress(nav.progressM);
+  nav.segIdx = pos.seg;
+  state.playerX = pos.x;
+  state.playerY = pos.y;
+  if (autoDrive) {
+    let diff = pos.headingDeg - state.headingDeg;
+    if (diff > 180) diff -= 360;
+    if (diff < -180) diff += 360;
+    state.headingDeg = (state.headingDeg + diff * (1 - Math.exp(-dt * 2.5)) + 360) % 360;
+    const pct = nav.total ? Math.round((nav.progressM / nav.total) * 100) : 0;
+    document.getElementById("rngProgress").value = pct;
+    document.getElementById("lblProgress").textContent = `${pct}%`;
+    document.getElementById("rngHeading").value = Math.round(state.headingDeg);
+    document.getElementById("lblHeading").textContent = `${Math.round(state.headingDeg)}°`;
+  }
+  updateNavDerivedState();
+}
+
+let lastFrameTs = performance.now();
+function renderLoop(ts) {
+  const dt = Math.min(0.1, Math.max(0, (ts - lastFrameTs) / 1000));
+  lastFrameTs = ts;
+  updateSimulation(dt);
+  fx.save();
+  if (displayMode === 0) renderModeA(dt);
+  else renderModeB();
+  fx.restore();
+  ctx.save();
+  if (hudMode) { // HUD mode is mirrored for windshield reflection, like the panel's MADCTL flip
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(frameCanvas, 0, 0);
+  ctx.restore();
+  requestAnimationFrame(renderLoop);
+}
+requestAnimationFrame(renderLoop);
+
+// ============================================================================
+// UI controls
+// ============================================================================
+function updateBadge() {
+  document.getElementById("modeBadge").textContent =
+    `${hudMode ? "HUD MODE (MIRRORED)" : "NORMAL MODE"} · ${displayMode === 0 ? "MAP VIEW" : "TURN VIEW"}`;
+  document.getElementById("btnToggleMode").textContent = displayMode === 0 ? "Switch to Turn View" : "Switch to Map View";
+  document.getElementById("btnMirror").classList.toggle("active", hudMode);
+}
+
+function setDisplayMode(mode) {
+  displayMode = mode;
+  updateBadge();
+}
+
+// Normal (dark) <-> HUD mode (black + bright, mirrored), like a long BOOT press on the device
+function toggleHudMode() {
+  hudMode = !hudMode;
+  fadeCache.clear();
+  updateBadge();
+}
+
+function pauseAutoDrive() {
+  autoDrive = false;
+  document.getElementById("btnSimDrive").textContent = "Resume Auto-Drive";
+}
+
+canvas.addEventListener("click", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+  if (x > canvas.width - 80 && y < 60) {
+    toggleHudMode();
+  } else {
+    setDisplayMode(displayMode === 0 ? 1 : 0);
+  }
+});
+
+document.getElementById("btnToggleMode").addEventListener("click", () => setDisplayMode(displayMode === 0 ? 1 : 0));
+
+document.getElementById("btnMirror").addEventListener("click", toggleHudMode);
+
+document.getElementById("selDisplay").addEventListener("change", (e) => setLayout(e.target.value));
+setLayout(document.getElementById("selDisplay").value);
+updateBadge();
+
+document.getElementById("btnSimDrive").addEventListener("click", (e) => {
+  autoDrive = !autoDrive;
+  e.target.textContent = autoDrive ? "Pause Auto-Drive" : "Resume Auto-Drive";
+});
+
+document.getElementById("rngSpeed").addEventListener("input", (e) => {
+  state.speedMph = Number(e.target.value);
+});
+
+document.getElementById("rngHeading").addEventListener("input", (e) => {
+  pauseAutoDrive();
+  state.headingDeg = Number(e.target.value);
+  document.getElementById("lblHeading").textContent = `${state.headingDeg}°`;
+});
+
+document.getElementById("rngProgress").addEventListener("input", (e) => {
+  pauseAutoDrive();
+  document.getElementById("lblProgress").textContent = `${e.target.value}%`;
+});
+
+// ============================================================================
+// Geocoding (Nominatim) + GPS
+// ============================================================================
+let currentGpsCoords = null;
+let gpsWatchId = null;
+
+function acquireCurrentGps() {
+  return new Promise((resolve, reject) => {
+    if (!("geolocation" in navigator)) {
+      reject(new Error("Geolocation is not supported by this browser"));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        currentGpsCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude, speedMps: pos.coords.speed, heading: pos.coords.heading };
+        resolve(currentGpsCoords);
+      },
+      (err) => reject(new Error(err.message || "Unable to read GPS location")),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+    );
+  });
+}
+
+async function resolveLocationInput(rawText, isSource) {
+  const trimmed = rawText.trim();
+  if (isSource && (!trimmed || /^current\s*location/i.test(trimmed))) {
+    if (!currentGpsCoords) {
+      logMsg("Acquiring current GPS position...");
+      await acquireCurrentGps();
+    }
+    return { lat: currentGpsCoords.lat, lon: currentGpsCoords.lon, label: "Current Location" };
+  }
+  if (!trimmed) {
+    throw new Error(isSource ? "Please enter a Source or click 'Use Current Location'" : "Please enter a Destination");
+  }
+  const coordMatch = trimmed.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  if (coordMatch) {
+    const lat = parseFloat(coordMatch[1]), lon = parseFloat(coordMatch[2]);
+    return { lat, lon, label: `${lat.toFixed(4)}, ${lon.toFixed(4)}` };
+  }
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(trimmed)}`;
+  const res = await fetch(url, { headers: { "Accept": "application/json" } });
+  const results = await res.json();
+  if (!results || !results.length) throw new Error(`Location not found: "${trimmed}"`);
+  return {
+    lat: parseFloat(results[0].lat),
+    lon: parseFloat(results[0].lon),
+    label: results[0].display_name.split(",").slice(0, 2).join(",")
+  };
+}
+
+document.getElementById("btnUseCurrentLoc").addEventListener("click", async () => {
+  try {
+    logMsg("Requesting browser/iPhone GPS location...");
+    const coords = await acquireCurrentGps();
+    document.getElementById("inpStart").value = "Current Location";
+    document.getElementById("lblSourceCoords").textContent = `${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}`;
+    logMsg(`Current location set: (${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)})`);
+  } catch (err) {
+    logMsg(`GPS error: ${err.message}`);
+  }
+});
+
+document.getElementById("btnLiveGpsTrack").addEventListener("click", (e) => {
+  if (gpsWatchId !== null) {
+    navigator.geolocation.clearWatch(gpsWatchId);
+    gpsWatchId = null;
+    e.target.classList.remove("active");
+    e.target.textContent = "Live GPS Tracking: Off";
+    logMsg("Stopped live GPS tracking (simulator resumes).");
+    return;
+  }
+  if (!("geolocation" in navigator)) {
+    logMsg("Geolocation not supported.");
+    return;
+  }
+  pauseAutoDrive();
+  e.target.classList.add("active");
+  e.target.textContent = "Live GPS Tracking: ON";
+  logMsg("Live GPS tracking active.");
+
+  gpsWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const { latitude, longitude, speed, heading } = pos.coords;
+      currentGpsCoords = { lat: latitude, lon: longitude, speedMps: speed, heading };
+      document.getElementById("lblSourceCoords").textContent = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+      state.playerX = (longitude - state.originLon) * mPerDegLonAt(state.originLat);
+      state.playerY = (latitude - state.originLat) * M_PER_DEG_LAT;
+      locateOnRoute(state.playerX, state.playerY);
+      if (typeof speed === "number" && !isNaN(speed) && speed >= 0) {
+        state.speedMph = Math.round(speed * 2.23694 * 10) / 10;
+        document.getElementById("rngSpeed").value = state.speedMph;
+      }
+      // iOS reports heading = -1/NaN when stationary; keep the last heading then
+      if (typeof heading === "number" && !isNaN(heading) && heading >= 0) {
+        state.headingDeg = heading;
+        document.getElementById("rngHeading").value = Math.round(heading);
+        document.getElementById("lblHeading").textContent = `${Math.round(heading)}°`;
+      }
+    },
+    (err) => logMsg(`GPS watch warning: ${err.message}`),
+    { enableHighAccuracy: true, maximumAge: 1000 }
+  );
+});
+
+// Current player position as WGS84 (GPS when tracking, otherwise derived from the simulator)
+function currentPlayerLatLon() {
+  if (gpsWatchId !== null && currentGpsCoords) return { lat: currentGpsCoords.lat, lon: currentGpsCoords.lon };
+  return {
+    lat: state.originLat + state.playerY / M_PER_DEG_LAT,
+    lon: state.originLon + state.playerX / mPerDegLonAt(state.originLat)
+  };
+}
+
+// ============================================================================
+// Route geometry helpers
+// ============================================================================
+// Douglas-Peucker on [{x,y}] (keeps first/last)
+function simplifyDP(pts, tol) {
+  if (pts.length <= 2) return pts.slice();
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  const tol2 = tol * tol;
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    const ax = pts[a].x, ay = pts[a].y, sx = pts[b].x - ax, sy = pts[b].y - ay;
+    const len2 = sx * sx + sy * sy || 1e-9;
+    let maxD2 = -1, maxI = -1;
+    for (let i = a + 1; i < b; i++) {
+      const t = Math.max(0, Math.min(1, ((pts[i].x - ax) * sx + (pts[i].y - ay) * sy) / len2));
+      const d2 = (pts[i].x - ax - sx * t) ** 2 + (pts[i].y - ay - sy * t) ** 2;
+      if (d2 > maxD2) { maxD2 = d2; maxI = i; }
+    }
+    if (maxD2 > tol2) {
+      keep[maxI] = 1;
+      stack.push([a, maxI], [maxI, b]);
+    }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+
+// Simplifies each section between maneuver vertices so turn points stay exact,
+// growing the tolerance until the route fits the device's vertex budget.
+function simplifyRouteForDevice(pts, maneuverIdxs, maxVerts) {
+  const anchors = [...new Set([0, ...maneuverIdxs, pts.length - 1])].sort((a, b) => a - b);
+  let tol = 1.5;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const out = [];
+    const remap = new Map();
+    for (let k = 0; k < anchors.length - 1; k++) {
+      const section = pts.slice(anchors[k], anchors[k + 1] + 1);
+      const simp = simplifyDP(section, tol);
+      if (k === 0) { remap.set(anchors[0], 0); out.push(simp[0]); }
+      for (let j = 1; j < simp.length; j++) out.push(simp[j]);
+      remap.set(anchors[k + 1], out.length - 1);
+    }
+    if (out.length <= maxVerts || attempt === 19) {
+      return { pts: out.slice(0, maxVerts), remap, tol };
+    }
+    tol *= 1.6;
+  }
+}
+
+const OSRM_MODIFIER_TO_ID = {
+  "uturn": 5, "sharp right": 8, "right": 7, "slight right": 6,
+  "straight": 1, "slight left": 2, "left": 3, "sharp left": 4
+};
+
+// ============================================================================
+// Road tiles: Overpass -> per-tile runs -> 0x20 payloads (grid matches the firmware)
+// ============================================================================
+const roads = { center: null, inflight: false, lastFailMs: 0 };
+const tileKey = (tx, ty) => `${tx},${ty}`;
+const tileXOf = (lon) => Math.floor(Math.round(lon * 1e7) / TILE_LON_E7);
+const tileYOf = (lat) => Math.floor(Math.round(lat * 1e7) / TILE_LAT_E7);
+
+// OSM maxspeed -> mph ("35 mph" -> 35, "50" (km/h by default) -> 31, "none"/"signals" -> 0)
+function parseMaxspeedMph(tag) {
+  if (!tag) return 0;
+  const m = String(tag).split(";")[0].trim().match(/^(\d+(?:\.\d+)?)\s*(mph|km\/h|kmh)?$/i);
+  if (!m) return 0;
+  const v = parseFloat(m[1]);
+  return Math.min(255, Math.round(m[2] && m[2].toLowerCase() === "mph" ? v : v * 0.621371));
+}
+
+function highwayTier(hwy) {
+  if (["motorway", "motorway_link", "trunk", "trunk_link"].includes(hwy)) return 3;
+  if (["primary", "primary_link", "secondary", "secondary_link", "tertiary", "tertiary_link"].includes(hwy)) return 2;
+  return 1;
+}
+
+// Splits every way into runs whose segments start in the same tile, so each segment is sent once
+function indexWaysIntoTiles(osmWays) {
+  const tiles = new Map();
+  const push = (key, tier, run) => {
+    if (run.length < 2) return;
+    if (!tiles.has(key)) tiles.set(key, []);
+    for (let s = 0; s < run.length - 1; s += 254) tiles.get(key).push({ tier, ll: run.slice(s, s + 255) });
+  };
+  for (const w of osmWays) {
+    let key = tileKey(tileXOf(w.ll[0][1]), tileYOf(w.ll[0][0]));
+    let run = [w.ll[0]];
+    for (let i = 1; i < w.ll.length; i++) {
+      run.push(w.ll[i]);
+      const k = tileKey(tileXOf(w.ll[i][1]), tileYOf(w.ll[i][0]));
+      if (k !== key) {
+        push(key, w.tier, run);
+        key = k;
+        run = [w.ll[i]];
+      }
+    }
+    push(key, w.tier, run);
+  }
+  return tiles;
+}
+
+function buildTilePayload(tx, ty) {
+  const runs = state.tileRuns.get(tileKey(tx, ty));
+  if (!runs || !runs.length) return null;
+  const mLon = mPerDegLonAt(state.originLat);
+  const swLon = (tx * TILE_LON_E7) * 1e-7, swLat = (ty * TILE_LAT_E7) * 1e-7;
+  // Highways and arterials first so the byte budget drops local streets before main roads
+  const sorted = runs.slice().sort((a, b) => b.tier - a.tier);
+  const chosen = [];
+  let bytes = 10;
+  for (const r of sorted) {
+    const sz = 2 + r.ll.length * 4;
+    if (bytes + sz > DEVICE_MAX_TILE_BYTES || chosen.length >= 1024) continue;
+    chosen.push(r);
+    bytes += sz;
+  }
+  const buf = new ArrayBuffer(bytes);
+  const dv = new DataView(buf);
+  dv.setInt32(0, tx, true);
+  dv.setInt32(4, ty, true);
+  dv.setUint16(8, chosen.length, true);
+  let o = 10;
+  const clamp16 = (v) => Math.max(-32767, Math.min(32767, Math.round(v)));
+  for (const r of chosen) {
+    dv.setUint8(o, r.tier);
+    dv.setUint8(o + 1, r.ll.length);
+    o += 2;
+    for (const [lat, lon] of r.ll) {
+      dv.setInt16(o, clamp16((lon - swLon) * mLon), true);
+      dv.setInt16(o + 2, clamp16((lat - swLat) * M_PER_DEG_LAT), true);
+      o += 4;
+    }
+  }
+  return new Uint8Array(buf);
+}
+
+async function ensureRoadsAround(lat, lon) {
+  if (!state.hasRealRoute || roads.inflight) return;
+  if (roads.center) {
+    const dx = (lon - roads.center.lon) * mPerDegLonAt(lat), dy = (lat - roads.center.lat) * M_PER_DEG_LAT;
+    if (Math.hypot(dx, dy) < 1200) return;
+  }
+  if (Date.now() - roads.lastFailMs < 15000) return;
+  roads.inflight = true;
+  try {
+    const dLat = 0.018, dLon = 0.024; // ~2 km around the player
+    const bbox = `${(lat - dLat).toFixed(4)},${(lon - dLon).toFixed(4)},${(lat + dLat).toFixed(4)},${(lon + dLon).toFixed(4)}`;
+    const query = `[out:json][timeout:20];way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street)$"](${bbox});out geom qt;`;
+    const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(query) });
+    if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
+    const osm = await res.json();
+    const mLon = mPerDegLonAt(state.originLat);
+    const osmWays = [];
+    for (const el of osm.elements || []) {
+      if (el.type !== "way" || !el.geometry || el.geometry.length < 2) continue;
+      osmWays.push({
+        tier: highwayTier(el.tags?.highway || "residential"),
+        limit: parseMaxspeedMph(el.tags?.maxspeed),
+        ll: el.geometry.map((p) => [p.lat, p.lon])
+      });
+    }
+    state.ways = osmWays.map((w) => ({
+      tier: w.tier,
+      limit: w.limit,
+      pts: w.ll.map(([la, lo]) => ({ x: (lo - state.originLon) * mLon, y: (la - state.originLat) * M_PER_DEG_LAT }))
+    }));
+    state.tileRuns = indexWaysIntoTiles(osmWays);
+    roads.center = { lat, lon };
+    ble.lastTileKey = null; // force a tile refresh on the HUD
+    logMsg(`Loaded ${osmWays.length} OSM roads (${state.tileRuns.size} tiles) around the player.`);
+  } catch (err) {
+    roads.lastFailMs = Date.now();
+    logMsg(`Road fetch failed: ${err.message}`);
+  } finally {
+    roads.inflight = false;
+  }
+}
+
+// ============================================================================
+// WebBLE streaming: serialized GATT queue, telemetry @ 5 Hz, street + tiles on change
+// ============================================================================
+const ble = {
+  device: null, tel: null, geo: null, connected: false,
+  queue: Promise.resolve(), telPending: false, transferId: 1,
+  lastStreetSig: "", lastStreetMs: 0,
+  lastTileKey: null, sentTiles: new Map(), reconnectTries: 0
+};
+
+// Web Bluetooth rejects overlapping GATT operations, so every write goes through one chain
+function bleEnqueue(fn) {
+  ble.queue = ble.queue.then(fn).catch((err) => {
+    if (ble.connected) logMsg(`BLE write failed: ${err.message}`);
+  });
+  return ble.queue;
+}
+
+function writeNoResponse(ch, data) {
+  return typeof ch.writeValueWithoutResponse === "function" ? ch.writeValueWithoutResponse(data) : ch.writeValue(data);
+}
+
+function writeWithResponse(ch, data) {
+  return typeof ch.writeValueWithResponse === "function" ? ch.writeValueWithResponse(data) : ch.writeValue(data);
+}
+
+function sendTelemetry() {
+  if (!ble.connected || ble.telPending) return;
+  const { lat, lon } = currentPlayerLatLon();
+  const buf = new ArrayBuffer(24);
+  const dv = new DataView(buf);
+  dv.setUint8(0, PKT_TELEMETRY);
+  dv.setInt32(1, Math.round(lat * 1e7), true);
+  dv.setInt32(5, Math.round(lon * 1e7), true);
+  dv.setUint16(9, Math.round(((state.headingDeg % 360) + 360) % 360 * 100) % 36000, true);
+  dv.setUint8(11, Math.min(255, Math.round(state.speedMph)));
+  dv.setUint8(12, Math.min(255, state.speedLimitMph));
+  dv.setUint8(13, state.maneuverId);
+  dv.setUint32(14, Math.round(state.turnDistM), true);
+  dv.setUint32(18, Math.round(state.destDistM), true);
+  dv.setUint16(22, Math.min(65535, Math.round(state.etaMinutes)), true);
+  ble.telPending = true;
+  bleEnqueue(async () => {
+    ble.telPending = false;
+    if (ble.tel) await writeNoResponse(ble.tel, new Uint8Array(buf));
+  });
+}
+
+function sendStreetIfChanged(force) {
+  if (!ble.connected) return;
+  const sig = `${state.maneuverId}|${state.nextWpIdx}|${state.streetName}`;
+  if (!force && sig === ble.lastStreetSig && Date.now() - ble.lastStreetMs < 3000) return;
+  ble.lastStreetSig = sig;
+  ble.lastStreetMs = Date.now();
+  const pkt = new Uint8Array(36);
+  const dv = new DataView(pkt.buffer);
+  dv.setUint8(0, PKT_STREET_NAME);
+  dv.setUint8(1, state.maneuverId);
+  dv.setUint16(2, Math.min(65535, state.nextWpIdx), true);
+  const ascii = state.streetName.normalize("NFKD").replace(/[^\x20-\x7E]/g, "").slice(0, 31);
+  for (let i = 0; i < ascii.length; i++) pkt[4 + i] = ascii.charCodeAt(i);
+  bleEnqueue(async () => { if (ble.tel) await writeWithResponse(ble.tel, pkt); });
+}
+
+// Each chunk is its own queue item so telemetry keeps flowing during large transfers
+function sendChunkedPayload(payloadType, bytes) {
+  const totalChunks = Math.max(1, Math.ceil(bytes.byteLength / BLE_CHUNK_PAYLOAD));
+  const tid = (ble.transferId++) & 0xFF;
+  let last = null;
+  for (let c = 0; c < totalChunks; c++) {
+    const slice = bytes.subarray(c * BLE_CHUNK_PAYLOAD, (c + 1) * BLE_CHUNK_PAYLOAD);
+    const pkt = new Uint8Array(6 + slice.byteLength);
+    const dv = new DataView(pkt.buffer);
+    dv.setUint8(0, payloadType);
+    dv.setUint8(1, tid);
+    dv.setUint16(2, c, true);
+    dv.setUint16(4, totalChunks, true);
+    pkt.set(slice, 6);
+    last = bleEnqueue(async () => { if (ble.geo) await writeWithResponse(ble.geo, pkt); });
+  }
+  return last;
+}
+
+function sendRouteOverBle() {
+  if (!ble.connected || state.routePts.length < 2) return;
+  const n = state.routePts.length;
+  const buf = new ArrayBuffer(10 + n * 4);
+  const dv = new DataView(buf);
+  dv.setInt32(0, Math.round(state.originLat * 1e7), true);
+  dv.setInt32(4, Math.round(state.originLon * 1e7), true);
+  dv.setUint16(8, n, true);
+  const clamp16 = (v) => Math.max(-32767, Math.min(32767, Math.round(v)));
+  state.routePts.forEach((pt, i) => {
+    dv.setInt16(10 + i * 4, clamp16(pt.x), true);
+    dv.setInt16(10 + i * 4 + 2, clamp16(pt.y), true);
+  });
+  sendChunkedPayload(PKT_ROUTE_POLYLINE, new Uint8Array(buf));
+  logMsg(`Queued route (0x10): ${n} vertices, ${buf.byteLength} bytes.`);
+  ble.sentTiles.clear();
+  ble.lastTileKey = null;
+  sendStreetIfChanged(true);
+}
+
+// Keeps the 3x3 tile neighbourhood around the player on the HUD (fits the C6's 12-tile LRU)
+function sendTilesAroundPlayer(lat, lon) {
+  if (!ble.connected || !state.tileRuns.size) return;
+  const tx = tileXOf(lon), ty = tileYOf(lat);
+  const key = tileKey(tx, ty);
+  if (key === ble.lastTileKey) return;
+  ble.lastTileKey = key;
+  const wanted = new Map();
+  let sent = 0;
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const k = tileKey(tx + dx, ty + dy);
+      const payload = buildTilePayload(tx + dx, ty + dy);
+      if (!payload) continue;
+      const sig = `${payload.byteLength}:${payload.reduce((h, b) => (h * 31 + b) >>> 0, 7)}`;
+      wanted.set(k, sig);
+      if (ble.sentTiles.get(k) !== sig) {
+        sendChunkedPayload(PKT_ROAD_TILE, payload);
+        sent++;
+      }
+    }
+  }
+  ble.sentTiles = wanted;
+  if (sent) logMsg(`Queued ${sent} road tile(s) around ${key}.`);
+}
+
+// Speed limit of the road under the player (OSM maxspeed), refreshed once a second.
+// 0 = unknown, which hides the red limit tick on the HUD speedometer.
+let lastLimitMs = 0;
+function updateSpeedLimitFromRoads() {
+  if (!state.hasRealRoute || Date.now() - lastLimitMs < 1000) return;
+  lastLimitMs = Date.now();
+  const px = state.playerX, py = state.playerY;
+  let best = { d2: 30 * 30, limit: 0 }; // only roads within 30 m count
+  for (const w of state.ways) {
+    if (!w.limit) continue;
+    for (let i = 0; i < w.pts.length - 1; i++) {
+      const a = w.pts[i], b = w.pts[i + 1];
+      if (Math.min(a.x, b.x) - 30 > px || Math.max(a.x, b.x) + 30 < px ||
+          Math.min(a.y, b.y) - 30 > py || Math.max(a.y, b.y) + 30 < py) continue;
+      const sx = b.x - a.x, sy = b.y - a.y, len2 = sx * sx + sy * sy || 1;
+      const t = Math.max(0, Math.min(1, ((px - a.x) * sx + (py - a.y) * sy) / len2));
+      const d2 = (px - a.x - sx * t) ** 2 + (py - a.y - sy * t) ** 2;
+      if (d2 < best.d2) best = { d2, limit: w.limit };
+    }
+  }
+  state.speedLimitMph = best.limit;
+}
+
+setInterval(() => {
+  const { lat, lon } = currentPlayerLatLon();
+  ensureRoadsAround(lat, lon);
+  updateSpeedLimitFromRoads();
+  if (!ble.connected) return;
+  sendTelemetry();
+  sendStreetIfChanged(false);
+  sendTilesAroundPlayer(lat, lon);
+}, TELEMETRY_PERIOD_MS);
+
+async function connectGatt() {
+  const server = await ble.device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE_UUID);
+  ble.tel = await service.getCharacteristic(CHAR_TELEMETRY_UUID);
+  ble.geo = await service.getCharacteristic(CHAR_GEOMETRY_UUID);
+  ble.connected = true;
+  ble.reconnectTries = 0;
+  ble.queue = Promise.resolve();
+  ble.telPending = false;
+  document.getElementById("btnConnectBle").textContent = "HUD Connected";
+  document.getElementById("btnConnectBle").classList.add("active");
+  logMsg(`Connected to ${ble.device.name || "GTA-HUD"} over WebBLE.`);
+  sendRouteOverBle();
+}
+
+function onGattDisconnected() {
+  ble.connected = false;
+  ble.tel = ble.geo = null;
+  document.getElementById("btnConnectBle").textContent = "Connect HUD (BLE)";
+  document.getElementById("btnConnectBle").classList.remove("active");
+  if (ble.reconnectTries >= 5) {
+    logMsg("HUD disconnected. Tap Connect to retry.");
+    return;
+  }
+  const delayMs = 1000 * 2 ** ble.reconnectTries++;
+  logMsg(`HUD disconnected; reconnecting in ${delayMs / 1000}s...`);
+  setTimeout(() => connectGatt().catch((err) => {
+    logMsg(`Reconnect failed: ${err.message}`);
+    onGattDisconnected();
+  }), delayMs);
+}
+
+document.getElementById("btnConnectBle").addEventListener("click", async () => {
+  try {
+    if (!navigator.bluetooth) throw new Error("Web Bluetooth unavailable (use Chrome/Edge, or Bluefy on iOS)");
+    if ("wakeLock" in navigator) await navigator.wakeLock.request("screen").catch(() => {});
+    if (ble.device && ble.device.gatt.connected) return;
+    ble.device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+    ble.device.addEventListener("gattserverdisconnected", onGattDisconnected);
+    ble.reconnectTries = 0;
+    await connectGatt();
+  } catch (err) {
+    logMsg(`BLE: ${err.message}`);
+  }
+});
+
+// ============================================================================
+// Real route: Nominatim -> OSRM (turn-by-turn) -> simplified route + roads
+// ============================================================================
+document.getElementById("btnFetchReal").addEventListener("click", async () => {
+  try {
+    const srcInfo = await resolveLocationInput(document.getElementById("inpStart").value, true);
+    document.getElementById("lblSourceCoords").textContent = `${srcInfo.lat.toFixed(4)}, ${srcInfo.lon.toFixed(4)}`;
+    const dstInfo = await resolveLocationInput(document.getElementById("inpDest").value, false);
+    document.getElementById("lblDestCoords").textContent = `${dstInfo.lat.toFixed(4)}, ${dstInfo.lon.toFixed(4)}`;
+    const sLat = srcInfo.lat, sLon = srcInfo.lon;
+    logMsg(`Routing "${srcInfo.label}" -> "${dstInfo.label}"...`);
+
+    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${sLon},${sLat};${dstInfo.lon},${dstInfo.lat}?overview=full&geometries=geojson&steps=true`;
+    const res = await fetch(osrmUrl);
+    const data = await res.json();
+    if (!data.routes || !data.routes.length) throw new Error("No driving route found");
+    const route = data.routes[0];
+
+    state.originLat = sLat;
+    state.originLon = sLon;
+    const mLon = mPerDegLonAt(sLat);
+    const fullPts = route.geometry.coordinates.map(([lon, lat]) => ({
+      x: (lon - sLon) * mLon,
+      y: (lat - sLat) * M_PER_DEG_LAT
+    }));
+
+    // OSRM steps -> maneuvers anchored to the nearest full-geometry vertex (searching forward)
+    const rawManeuvers = [];
+    let searchFrom = 0;
+    for (const step of route.legs.flatMap((l) => l.steps)) {
+      const t = step.maneuver.type;
+      if (t === "depart" || t === "new name" || t === "notification") continue;
+      const mod = step.maneuver.modifier || "straight";
+      if (t === "continue" && mod === "straight") continue;
+      const [mlon, mlat] = step.maneuver.location;
+      const mx = (mlon - sLon) * mLon, my = (mlat - sLat) * M_PER_DEG_LAT;
+      let best = searchFrom, bestD = Infinity;
+      for (let i = searchFrom; i < fullPts.length; i++) {
+        const d = (fullPts[i].x - mx) ** 2 + (fullPts[i].y - my) ** 2;
+        if (d < bestD) { bestD = d; best = i; }
+        if (bestD < 1 && d > 400 * 400) break;
+      }
+      searchFrom = best;
+      rawManeuvers.push({
+        idx: best,
+        id: t === "arrive" ? 9 : (OSRM_MODIFIER_TO_ID[mod] ?? 1),
+        name: t === "arrive" ? "Destination" : (step.name || step.ref || step.destinations || "").slice(0, 31)
+      });
+    }
+
+    const simp = simplifyRouteForDevice(fullPts, rawManeuvers.map((m) => m.idx), DEVICE_MAX_ROUTE_VERTS);
+    const maneuvers = rawManeuvers.map((m) => ({ ...m, idx: simp.remap.get(m.idx) ?? simp.pts.length - 1 }));
+    if (fullPts.some((p) => Math.abs(p.x) > 32767 || Math.abs(p.y) > 32767)) {
+      logMsg("Warning: route extends > 32 km from the start; the HUD clamps coordinates beyond that.");
+    }
+
+    setNavRoute(simp.pts, maneuvers, route.duration);
+    state.hasRealRoute = true;
+    state.speedLimitMph = 0; // unknown until a road with a maxspeed tag is under the player
+    state.ways = [];
+    state.tileRuns = new Map();
+    roads.center = null;
+    nav.progressM = 0;
+    autoDrive = gpsWatchId === null;
+    document.getElementById("btnSimDrive").textContent = autoDrive ? "Pause Auto-Drive" : "Resume Auto-Drive";
+    updateSimulation(0);
+
+    logMsg(`Route ready: ${fullPts.length} -> ${simp.pts.length} pts (tol ${simp.tol.toFixed(1)} m), ` +
+           `${maneuvers.length} maneuvers, ${(nav.total / 1609.34).toFixed(1)} mi, ${Math.round(route.duration / 60)} min.`);
+    sendRouteOverBle();
+    await ensureRoadsAround(sLat, sLon);
+  } catch (err) {
+    logMsg(`Route error: ${err.message}`);
+  }
+});
+
+buildDemoGrid();
+loadDemoRoute();
+</script>
+</body>
+</html>
