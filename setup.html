@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Set up "Send to HUD" (iPhone)</title>
+<title>Set up "Send to HUD"</title>
 <style>
   body { font-family: -apple-system, sans-serif; background: #0b0d12; color: #eef0f4; padding: 18px; line-height: 1.45; max-width: 640px; margin: auto; }
   h1 { font-size: 22px; }
@@ -20,7 +20,9 @@
 </style>
 </head>
 <body>
-<h1>Set up "Send to HUD" on iPhone</h1>
+<h1>Set up "Send to HUD"</h1>
+<p class="note"><a href="#android" style="color:#ffb800">Android? Jump to the Android steps ↓</a> (no shortcut needed)</p>
+<h2 style="color:#fff">iPhone</h2>
 <p class="note">One-time setup (about 3 minutes). Afterwards: in Apple or Google Maps tap <b>Share → Send to HUD</b>, Bluefy opens with the destination, tap <b>Start</b>.</p>
 
 <h2>Before you start</h2>
@@ -62,6 +64,16 @@
   <li>Bluefy opens with <b>"Navigate to …"</b> at the bottom → tap <b>Start</b> (pick <b>GTA-HUD</b> if Bluetooth asks).</li>
 </ol>
 <p class="note">AirDropped Maps links open in Apple Maps first; share them from there the same way.</p>
+
+<h2 id="android" style="color:#fff; margin-top: 40px;">Android</h2>
+<p class="note">No extra app and no shortcut: Chrome on Android has Bluetooth built in.</p>
+<ol>
+  <li>Scan the GTA HUD QR code with the camera (or open <code>https://amkurup.github.io/gta-hud/</code>) — it opens in <b>Chrome</b>.</li>
+  <li>Chrome menu <b>⋮</b> → <b>Install app</b> (or <b>Add to Home screen</b>) → <b>Install</b>.</li>
+  <li>Open <b>GTA HUD</b> once from the home screen; allow <b>Location</b> and <b>Nearby devices</b> when asked.</li>
+  <li>Use: in <b>Google Maps</b> open a place or directions → <b>Share</b> → <b>GTA HUD</b> → tap <b>Start</b> (pick <b>GTA-HUD</b> the first time Bluetooth asks).</li>
+</ol>
+<p class="note">Google's short share links can't be opened by a web page, so the app uses the place name and address that Google includes in the share; if a place isn't found, type the address instead.</p>
 
 <script>
 document.getElementById("copy").addEventListener("click", async () => {
