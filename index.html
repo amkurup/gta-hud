@@ -1261,7 +1261,7 @@ const ble = {
 // Web Bluetooth rejects overlapping GATT operations, so every write goes through one chain
 function bleEnqueue(fn) {
   ble.queue = ble.queue.then(fn).catch((err) => {
-    if (ble.connected) logMsg(`BLE write failed: ${err.message}`);
+    if (ble.connected) logMsg(`BLE write failed: ${errText(err)}`);
   });
   return ble.queue;
 }
@@ -1475,21 +1475,31 @@ function onGattDisconnected() {
   const delayMs = 1000 * 2 ** ble.reconnectTries++;
   logMsg(`HUD disconnected; reconnecting in ${delayMs / 1000}s...`);
   setTimeout(() => connectGatt().catch((err) => {
-    logMsg(`Reconnect failed: ${err.message}`);
+    logMsg(`Reconnect failed: ${errText(err)}`);
     onGattDisconnected();
   }), delayMs);
 }
 
-// Reuses a previously permitted HUD when the browser supports getDevices() (no picker);
-// otherwise shows the device picker, which must happen right after a user tap.
+// Readable text for whatever a browser rejects with (Bluefy can reject with non-Error values)
+function errText(err) {
+  if (err == null) return String(err);
+  if (typeof err === "string") return err;
+  const parts = [err.name, err.message].filter(Boolean);
+  if (parts.length) return parts.join(": ");
+  try { return JSON.stringify(err); } catch { return String(err); }
+}
+
+// Shows the device picker. The browser only allows this directly after a user tap, so callers
+// must invoke it before any other await in their click handler.
 async function connectHud() {
   if (!navigator.bluetooth) throw new Error("Web Bluetooth unavailable (use Chrome/Edge, or Bluefy on iOS)");
   if (ble.device && ble.device.gatt.connected) return;
-  if (!ble.device && typeof navigator.bluetooth.getDevices === "function") {
-    const known = (await navigator.bluetooth.getDevices().catch(() => [])).find((d) => d.name === "GTA-HUD");
-    if (known) ble.device = known;
+  if (!ble.device) {
+    ble.device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }, { name: "GTA-HUD" }],
+      optionalServices: [SERVICE_UUID]
+    });
   }
-  if (!ble.device) ble.device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
   if (ble.listenerFor !== ble.device) {
     ble.device.addEventListener("gattserverdisconnected", onGattDisconnected);
     ble.listenerFor = ble.device;
@@ -1504,11 +1514,14 @@ async function connectHud() {
 }
 
 document.getElementById("btnConnectBle").addEventListener("click", async () => {
+  const pending = connectHud(); // first thing in the tap handler (user-activation rules)
   if ("wakeLock" in navigator) navigator.wakeLock.request("screen").catch(() => {});
   try {
-    await connectHud();
+    await pending;
   } catch (err) {
-    logMsg(`BLE: ${err.message}`);
+    const msg = `Bluetooth connect failed: ${errText(err)}`;
+    logMsg(msg);
+    window.alert(`${msg}\n\nMake sure the HUD is powered, nothing else (e.g. a Chrome tab on the Mac) is connected to it, and Bluetooth is allowed for Bluefy in iOS Settings.`);
   }
 });
 
@@ -1707,12 +1720,11 @@ function hideTripSheet() {
 }
 
 async function startTrip(parsed) {
+  // Bluetooth first: requestDevice() is only allowed directly after the user's tap
+  const pending = ble.connected ? Promise.resolve() : connectHud();
   hideTripSheet();
   if ("wakeLock" in navigator) navigator.wakeLock.request("screen").catch(() => {});
-  // Bluetooth first: requestDevice() is only allowed shortly after the user's tap
-  if (!ble.connected) {
-    await connectHud().catch((err) => logMsg(`BLE: ${err.message} (route continues; tap Connect HUD to retry)`));
-  }
+  await pending.catch((err) => logMsg(`Bluetooth connect failed: ${errText(err)} (route continues; tap Connect HUD to retry)`));
   try {
     logMsg("Getting GPS position...");
     const here = await acquireCurrentGps();
