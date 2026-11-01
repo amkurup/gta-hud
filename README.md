@@ -6,3 +6,4 @@ tiles and live telemetry to the HUD over BLE. It also works standalone as a HUD 
 
 Open in a Web Bluetooth browser (Chrome/Edge on desktop or Android, Bluefy on iOS):
 https://amkurup.github.io/gta-hud/
+
