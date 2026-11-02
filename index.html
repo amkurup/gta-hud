@@ -116,6 +116,10 @@
   .field button.ico:active { background: #e3e4e8; }
   .field .ico svg { width: 22px; height: 22px; }
   .via { font-size: 13px; color: var(--muted); margin: -4px 8px 8px; }
+  .map-status { font-size: 13px; font-weight: 600; color: var(--muted); margin: -8px 6px 10px; }
+  .dest-match { font-size: 14px; font-weight: 600; color: var(--gold); margin: -10px 6px 12px; }
+  .dest-match:empty { display: none; }
+  .map-status:empty { display: none; }
   .sheet.is-trip .field, .sheet.is-trip .via { display: none; }
   /* During a trip the sheet goes dark so the screen isn't a bright white panel while driving */
   .sheet { transition: background-color 0.4s, color 0.4s; }
@@ -233,6 +237,8 @@
     <div class="grabber"></div>
     <div class="kicker" id="sheetKicker"></div>
     <h1 id="sheetTitle">Where to?</h1>
+    <div class="dest-match" id="destMatch"></div>
+    <div class="map-status" id="mapStatus" aria-live="polite"></div>
 
     <div class="field">
       <input id="inpStart" type="text" placeholder="Current location" autocomplete="off" />
@@ -524,7 +530,7 @@ const LAYOUTS = {
     speedoX: 48, speedoY: 136, speedoR: 24, speedoHalfW: 2, speedoNumPx: 17, speedoMphPx: 8, shadeR: 38,
     etaX: 290, etaNumY: 118, etaNumPx: 38, etaUnitY: 146, etaDistY: 163, etaSmallPx: 13,
     rightFadeX: 244, rightFadeY: 88, dotX: 310, dotY: 10, dotR: 5,
-    turn: { arrowX: 78, arrowY: 90, arrowSize: 140, numX: 236, numY: 48, numPx: 48, unitY: 86, unitPx: 21,
+    turn: { arrowX: 80, arrowY: 62, arrowSize: 108, speedoX: 40, speedoY: 140, speedoR: 23, numX: 236, numY: 48, numPx: 48, unitY: 86, unitPx: 21,
             streetY: 114, streetPx: 13, streetMaxW: 152, barX: 160, barY: 128, barW: 152, barH: 8,
             etaX: 314, etaY: 169, etaPx: 13, sepR: 2 }
   },
@@ -536,7 +542,7 @@ const LAYOUTS = {
     speedoX: 74, speedoY: 250, speedoR: 40, speedoHalfW: 3, speedoNumPx: 26, speedoMphPx: 12, shadeR: 60,
     etaX: 428, etaNumY: 212, etaNumPx: 58, etaUnitY: 256, etaDistY: 290, etaSmallPx: 17,
     rightFadeX: 362, rightFadeY: 166, dotX: 464, dotY: 16, dotR: 7,
-    turn: { arrowX: 120, arrowY: 165, arrowSize: 230, numX: 354, numY: 88, numPx: 72, unitY: 150, unitPx: 34,
+    turn: { arrowX: 124, arrowY: 128, arrowSize: 196, speedoX: 66, speedoY: 262, speedoR: 38, numX: 354, numY: 88, numPx: 72, unitY: 150, unitPx: 34,
             streetY: 198, streetPx: 17, streetMaxW: 228, barX: 240, barY: 222, barW: 228, barH: 12,
             etaX: 472, etaY: 314, etaPx: 17, sepR: 3 }
   }
@@ -848,6 +854,7 @@ function renderModeB() {
   const th = theme(), T = L.turn, accent = turnArrowColor(state.turnDistM);
   fx.fillStyle = th.colBg; fx.fillRect(0, 0, L.w, L.h);
   drawManeuverArrow(T.arrowX, T.arrowY, T.arrowSize, state.maneuverId, accent, th.colBg);
+  miniSpeedo(T.speedoX, T.speedoY, T.speedoR);
 
   if (state.maneuverId === 9 && state.turnDistM < 30) {
     txt("Arrived", T.numX, T.numY + 10, T.unitPx * 1.2, th.textMain, "center", 800);
@@ -1045,15 +1052,144 @@ async function resolveLocationInput(rawText, isSource) {
     const lat = parseFloat(coordMatch[1]), lon = parseFloat(coordMatch[2]);
     return { lat, lon, label: `${lat.toFixed(4)}, ${lon.toFixed(4)}` };
   }
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(trimmed)}`;
-  const res = await fetch(url, { headers: { "Accept": "application/json" } });
-  const results = await res.json();
-  if (!results || !results.length) throw new Error(`Location not found: "${trimmed}"`);
-  return {
-    lat: parseFloat(results[0].lat),
-    lon: parseFloat(results[0].lon),
-    label: results[0].display_name.split(",").slice(0, 2).join(",")
+  const hit = await geocodeAddress(trimmed);
+  if (!hit) throw new Error(`Couldn't find the exact address "${trimmed}". Share it again from Maps, or check the house number and city.`);
+  return hit;
+}
+
+// US Census geocoder (exact house numbers for US street addresses, from TIGER data that
+// OpenStreetMap often lacks). It only offers JSONP (no CORS), so it runs inside a sandboxed,
+// invisible iframe with an opaque origin: the census.gov script cannot touch this page, its
+// storage, location or Bluetooth, and only plain numbers/strings come back (validated here).
+let censusSeq = 0;
+function censusGeocode(address) {
+  return new Promise((resolve) => {
+    const id = `census${++censusSeq}`, frame = document.createElement("iframe");
+    const finish = (list) => {
+      clearTimeout(timer);
+      window.removeEventListener("message", onMsg);
+      frame.remove();
+      resolve(list);
+    };
+    const onMsg = (e) => {
+      if (e.source !== frame.contentWindow || !e.data || e.data.id !== id || !Array.isArray(e.data.m)) return;
+      finish(e.data.m.slice(0, 5).map((r) => ({
+        lat: Number(r.y), lon: Number(r.x), label: String(r.a || "").slice(0, 120)
+      })).filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lon) && Math.abs(r.lat) <= 90 && Math.abs(r.lon) <= 180));
+    };
+    const timer = setTimeout(() => finish([]), 12000);
+    window.addEventListener("message", onMsg);
+    const src = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current" +
+      `&format=jsonp&callback=cb&address=${encodeURIComponent(address)}`;
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.style.display = "none";
+    frame.srcdoc = `<script>function cb(j){var m=(j&&j.result&&j.result.addressMatches)||[];` +
+      `parent.postMessage({id:${JSON.stringify(id)},m:m.map(function(x){return{a:x.matchedAddress,x:x.coordinates&&x.coordinates.x,y:x.coordinates&&x.coordinates.y}})},"*")}<\/script>` +
+      `<script src="${src.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" onerror="parent.postMessage({id:${JSON.stringify(id).replace(/"/g, "&quot;")},m:[]},'*')"><\/script>`;
+    document.body.appendChild(frame);
+  });
+}
+
+// Nominatim's usage policy: at most one request per second
+let nominatimLastMs = 0;
+async function nominatimSearch(params) {
+  const wait = nominatimLastMs + 1100 - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  nominatimLastMs = Date.now();
+  try {
+    const res = await fetchWithTimeout(`https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&${params}`,
+      { headers: { Accept: "application/json" } }, 12000);
+    return res.ok ? await res.json() : [];
+  } catch { return []; }
+}
+
+async function photonSearch(q) {
+  const near = currentGpsCoords ? `&lat=${currentGpsCoords.lat.toFixed(3)}&lon=${currentGpsCoords.lon.toFixed(3)}` : "";
+  try {
+    const res = await fetchWithTimeout(`https://photon.komoot.io/api/?limit=5&q=${encodeURIComponent(q)}${near}`,
+      { headers: { Accept: "application/json" } }, 12000);
+    return res.ok ? ((await res.json()).features || []) : [];
+  } catch { return []; }
+}
+
+const inUsArea = (p) => p && p.lat > 18 && p.lat < 72 && p.lon > -170 && p.lon < -64;
+
+// Address / place text -> { lat, lon, label, matched } or null. Throws when the address matches
+// several places. With a house number the result must be that exact address (never just the
+// street); without one (a place or business name) the nearest good match wins.
+async function geocodeAddress(text) {
+  const want = parseAddressParts(text);
+  const decide = (cands, what) => {
+    const pick = pickConsistent(cands);
+    if (pick && pick.ambiguous) {
+      const opts = pick.ambiguous.slice(0, 3).map((c) => c.label).join(" / ");
+      throw new Error(`"${text}" matches several places (${opts}). Add the city or ZIP code.`);
+    }
+    if (pick) logMsg(`Address "${text}" -> ${pick.label} (${what}).`);
+    return pick;
   };
+
+  if (want.house && want.street) {
+    const line = [`${want.house} ${want.street}`, want.city, [want.state, want.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    // 1. US Census: exact house number
+    if (want.usa || (!want.state && !want.country && inUsArea(currentGpsCoords))) {
+      const cands = (await censusGeocode(line)).filter((c) => addressMatches(want, parseAddressParts(c.label)));
+      // "3540 E JEFFERSON AVE, DETROIT" -> "3540 E Jefferson Ave, Detroit"
+      const nice = (t) => t.toLowerCase().replace(/\b([a-z])([a-z]*)/g, (w, a, b) =>
+        /^(n|s|e|w|ne|nw|se|sw)$/.test(w) ? w.toUpperCase() : a.toUpperCase() + b);
+      const hit = decide(cands.map((c) => ({ ...c, label: nice(c.label.split(",").slice(0, 2).map((x) => x.trim()).join(", ")) })), "US Census");
+      if (hit) return { ...hit, matched: hit.label };
+    }
+    // 2. Nominatim (OpenStreetMap), structured: only answers at this exact house number
+    const params = new URLSearchParams({ street: `${want.house} ${want.street}` });
+    if (want.city) params.set("city", want.city);
+    if (want.state) params.set("state", want.state);
+    if (want.zip) params.set("postalcode", want.zip);
+    if (want.usa) params.set("countrycodes", "us");
+    const nom = (await nominatimSearch(params.toString())).map((r) => {
+      const ad = r.address || {};
+      return {
+        lat: parseFloat(r.lat), lon: parseFloat(r.lon),
+        label: [[ad.house_number, ad.road].filter(Boolean).join(" "), ad.city || ad.town || ad.village || ad.hamlet].filter(Boolean).join(", "),
+        got: { house: ad.house_number, street: ad.road, zip: ad.postcode, city: ad.city || ad.town || ad.village || ad.hamlet }
+      };
+    }).filter((c) => addressMatches(want, c.got));
+    let hit = decide(nom, "OpenStreetMap");
+    if (hit) return { ...hit, matched: hit.label };
+    // 3. Photon (OpenStreetMap, forgiving spelling): same strict check
+    const pho = (await photonSearch(line)).map((f) => {
+      const pr = f.properties || {}, [lon, lat] = f.geometry.coordinates;
+      return {
+        lat, lon, label: [[pr.housenumber, pr.street].filter(Boolean).join(" "), pr.city].filter(Boolean).join(", "),
+        got: { house: pr.housenumber, street: pr.street, zip: pr.postcode, city: pr.city }
+      };
+    }).filter((c) => addressMatches(want, c.got));
+    hit = decide(pho, "OpenStreetMap/Photon");
+    if (hit) return { ...hit, matched: hit.label };
+    return null; // never fall back to "somewhere on that street"
+  }
+
+  // Place or business name (no house number): nearest of the good matches
+  const here = currentGpsCoords;
+  const byDistance = (list) => here ? list.sort((a, b) => distM(here, a) - distM(here, b)) : list;
+  const nom = (await nominatimSearch(`q=${encodeURIComponent(text)}`)).map((r) => ({
+    lat: parseFloat(r.lat), lon: parseFloat(r.lon), label: r.display_name.split(",").slice(0, 3).join(",")
+  }));
+  if (nom.length) {
+    const best = byDistance(nom)[0];
+    logMsg(`Place "${text}" -> ${best.label} (OpenStreetMap).`);
+    return { ...best, matched: best.label };
+  }
+  const pho = (await photonSearch(text)).map((f) => {
+    const pr = f.properties || {}, [lon, lat] = f.geometry.coordinates;
+    return { lat, lon, label: [pr.name, [pr.housenumber, pr.street].filter(Boolean).join(" "), pr.city].filter(Boolean).join(", ") };
+  });
+  if (pho.length) {
+    const best = byDistance(pho)[0];
+    logMsg(`Place "${text}" -> ${best.label} (OpenStreetMap/Photon).`);
+    return { ...best, matched: best.label };
+  }
+  return null;
 }
 
 function startGpsTracking() {
@@ -1179,24 +1315,30 @@ const OSRM_MODIFIER_TO_ID = {
 // Road tiles: Overpass -> per-tile runs -> 0x20 payloads (grid matches the firmware)
 // ============================================================================
 // ============================================================================
-// Map data store. The phone downloads OSM roads + buildings/parks/water (it has the mobile
-// data; the HUD never needs internet) in HUD-tile-sized cells and keeps them in lat/lon:
-//  - around the vehicle: the 5x5 cells (~2 x 2.3 km) around the player;
-//  - on a trip: the whole route corridor (cells along the route plus one either side) is
-//    preloaded from Start, nearest first, up to PRELOAD_AHEAD_M ahead of the car.
-// Live 3x3 tiles then stream to the HUD from phone memory, even through dead zones, and if the
-// HUD has a microSD card the corridor tiles are also sent ahead of time and stored there.
+// Map data store. The phone downloads the map (it has the mobile data; the HUD never needs
+// internet) and keeps it in lat/lon:
+//  - roads, buildings, parks and water from OpenFreeMap vector tiles (OpenStreetMap data from
+//    a CDN: fast and reliable), zoom-14 tiles of ~2.4 x 1.8 km;
+//  - speed limits from Overpass (OSM maxspeed), optional: its public servers are often busy.
+// Around the vehicle the 5x5 HUD cells (~2 x 2.3 km) are kept loaded; on a trip the whole route
+// corridor (cells along the route plus one either side) is preloaded from Start, nearest first,
+// up to PRELOAD_AHEAD_M ahead. Live 3x3 tiles then stream to the HUD from phone memory, even
+// through dead zones, and with a microSD card in the HUD the corridor tiles are stored there.
 // ============================================================================
 const PRELOAD_AHEAD_M = 40000;   // route corridor window ahead of the car
-const STORE_MAX_ITEMS = 120000;  // roads + areas kept in phone memory before far data is evicted
+const STORE_MAX_ITEMS = 150000;  // roads + areas kept in phone memory before far data is evicted
 const PROJ_RADIUS_M = 2500;      // radar/simulator/speed-limit work on data within this radius
+const VT_ZOOM = 14, VT_PARALLEL = 3, VT_TIMEOUT_MS = 20000;
 const HIGHWAY_RE = "^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street)$";
 
 const mapStore = {
-  ways: new Map(),       // "w<id>" -> { tier, limit, ll: [[lat,lon]], bb: [s,w,n,e] }
-  areas: new Map(),      // "w<id>" | "r<id>.<n>" -> { kind: "blocks"|"parks"|"water", ll, bb }
-  cells: new Set(),      // downloaded cells
-  queue: [], queued: new Set(), retryAt: new Map(), inflight: false,
+  ways: new Map(),       // id -> { tier, ll: [[lat,lon]], bb: [s,w,n,e] }
+  areas: new Map(),      // id -> { kind: "blocks"|"parks"|"water", ll, bb }
+  limitWays: new Map(),  // "w<id>" -> { limit, ll, bb } (speed-limit lookup only, never drawn)
+  // Download queues: vector tiles (keyed "x,y" at VT_ZOOM) and speed limits (keyed by HUD cell)
+  vt: { done: new Set(), queue: [], queued: new Set(), retryAt: new Map(), inflight: 0, items: new Map() },
+  limits: { done: new Set(), queue: [], queued: new Set(), retryAt: new Map(), inflight: false, maxRect: 8 },
+  failStreak: 0,
   tileRuns: new Map(), tileAreas: new Map(), // per-tile index of the whole store (HUD payloads)
   projCenter: null, projDirty: true,
   corridor: [], corridorSet: new Set(),      // route corridor cells [{ key, along }] in route order
@@ -1204,6 +1346,7 @@ const mapStore = {
 };
 state.tileRuns = mapStore.tileRuns;
 state.tileAreas = mapStore.tileAreas;
+state.limitWays = [];
 
 // Developer "Simulate drive" without a trip uses the synthetic demo city instead of the store
 const isDemo = () => simulating && !state.hasRealRoute;
@@ -1243,10 +1386,13 @@ function projectNearby(lat, lon) {
   const s = lat - dLat, n = lat + dLat, w = lon - dLon, e = lon + dLon;
   const hit = (bb) => bb[2] >= s && bb[0] <= n && bb[3] >= w && bb[1] <= e;
   const ways = [], areas = { blocks: [], parks: [], water: [] };
-  for (const way of mapStore.ways.values()) if (hit(way.bb)) ways.push({ tier: way.tier, limit: way.limit, pts: proj(way.ll) });
+  for (const way of mapStore.ways.values()) if (hit(way.bb)) ways.push({ tier: way.tier, pts: proj(way.ll) });
   for (const ar of mapStore.areas.values()) if (hit(ar.bb)) areas[ar.kind].push(proj(ar.ll));
+  const limits = [];
+  for (const lw of mapStore.limitWays.values()) if (hit(lw.bb)) limits.push({ limit: lw.limit, pts: proj(lw.ll) });
   state.ways = ways;
   state.areas = areas;
+  state.limitWays = limits;
   mapStore.projCenter = { lat, lon };
   mapStore.projDirty = false;
 }
@@ -1464,121 +1610,307 @@ function buildTilePayload(tx, ty) {
   return new Uint8Array(buf);
 }
 
-// Public Overpass servers are busy at times (HTTP 502/504): fall back to mirrors
+// Public Overpass servers are busy at times (HTTP 429/502/504, or a request that just hangs on
+// mobile data): every attempt has a time limit, and the server that last worked is tried first
 const OVERPASS_URLS = [
   "https://overpass-api.de/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
   "https://lz4.overpass-api.de/api/interpreter"
 ];
-async function overpassQuery(query) {
+let overpassPreferred = 0;
+async function overpassQuery(query, timeoutMs = 30000) {
   let last = null;
-  for (const url of OVERPASS_URLS) {
+  for (let i = 0; i < OVERPASS_URLS.length; i++) {
+    const idx = (overpassPreferred + i) % OVERPASS_URLS.length, url = OVERPASS_URLS[idx];
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const res = await fetch(url, { method: "POST", body: "data=" + encodeURIComponent(query) });
-      if (res.ok) {
-        const json = await res.json();
-        // Timeouts/out-of-memory come back as HTTP 200 with partial data and a remark
-        if (json.remark && /error|timed out|out of memory/i.test(json.remark)) throw new Error(json.remark.slice(0, 120));
-        return json;
-      }
-      last = new Error(`${new URL(url).host} HTTP ${res.status}`);
+      const res = await fetch(url, { method: "POST", body: "data=" + encodeURIComponent(query), signal: ctrl.signal });
+      if (!res.ok) throw new Error(`${new URL(url).host} HTTP ${res.status}`);
+      const json = await res.json();
+      // Timeouts/out-of-memory come back as HTTP 200 with partial data and a remark
+      if (json.remark && /error|timed out|out of memory/i.test(json.remark)) throw new Error(json.remark.slice(0, 120));
+      overpassPreferred = idx;
+      return json;
     } catch (err) {
-      last = err;
+      last = err.name === "AbortError" ? new Error(`${new URL(url).host} timed out`) : err;
+    } finally {
+      clearTimeout(timer);
     }
   }
   throw last;
 }
 
-// Joins open member ways of a multipolygon (e.g. a river) into closed rings
-function assembleRings(segs) {
-  const rings = [], pool = segs.map((x) => x.slice());
-  // [lat, lon] points; 5e-6 deg ~ 0.5 m
-  const same = (a, b) => Math.abs(a[0] - b[0]) < 5e-6 && Math.abs(a[1] - b[1]) < 5e-6;
-  while (pool.length) {
-    let ring = pool.shift(), grew = true;
-    while (grew && !same(ring[0], ring[ring.length - 1])) {
-      grew = false;
-      for (let i = 0; i < pool.length; i++) {
-        const seg = pool[i], end = ring[ring.length - 1];
-        if (same(end, seg[0])) ring = ring.concat(seg.slice(1));
-        else if (same(end, seg[seg.length - 1])) ring = ring.concat(seg.slice(0, -1).reverse());
-        else continue;
-        pool.splice(i, 1);
-        grew = true;
-        break;
-      }
-    }
-    rings.push(ring);
+// ---------- OpenFreeMap vector tiles ----------
+// The tile URL contains the weekly data version, so it is read from the TileJSON (and cached
+// in case that one request fails); a 404 means the version moved on: re-read it.
+let vtUrlTemplate = null;
+async function fetchWithTimeout(url, opts, ms) {
+  const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } catch (err) {
+    throw err.name === "AbortError" ? new Error(`${new URL(url).host} timed out`) : err;
+  } finally {
+    clearTimeout(timer);
   }
-  return rings;
 }
 
-// One Overpass request covers a compact rectangle of cells (cheaper for the public servers
-// than many small boxes); every cell inside it counts as downloaded afterwards
-function rectQuery(r) {
-  const bb = `${r.s.toFixed(5)},${r.w.toFixed(5)},${r.n.toFixed(5)},${r.e.toFixed(5)}`;
-  return `[out:json][timeout:60];(` +
-    `way["highway"~"${HIGHWAY_RE}"](${bb});` +
-    `way["building"](${bb});` +
-    `way["leisure"~"^(park|garden|pitch|playground)$"](${bb});` +
-    `way["landuse"~"^(grass|recreation_ground|cemetery|forest|meadow)$"](${bb});` +
-    `way["natural"~"^(water|wood)$"](${bb});` +
-    `relation["natural"="water"](${bb});` +
-    `relation["waterway"="riverbank"](${bb});` +
-    `);out geom qt;`;
+async function vtTemplate() {
+  if (vtUrlTemplate) return vtUrlTemplate;
+  try {
+    const res = await fetchWithTimeout("https://tiles.openfreemap.org/planet", {}, 10000);
+    if (!res.ok) throw new Error(`tiles.openfreemap.org HTTP ${res.status}`);
+    vtUrlTemplate = (await res.json()).tiles[0];
+    localStorage.setItem("vtTemplate", vtUrlTemplate);
+  } catch (err) {
+    const cached = localStorage.getItem("vtTemplate");
+    if (!cached) throw err;
+    vtUrlTemplate = cached;
+  }
+  return vtUrlTemplate;
 }
 
-// Takes the first queued cell plus any queued cells that keep the rectangle within
-// MAX_RECT_CELLS x MAX_RECT_CELLS cells (~2.5 km)
-const MAX_RECT_CELLS = 6;
-function takeBatchRect() {
+const vtX = (lon) => Math.floor(((lon + 180) / 360) * 2 ** VT_ZOOM);
+const vtY = (lat) => {
+  const r = (lat * Math.PI) / 180;
+  return Math.floor(((1 - Math.asinh(Math.tan(r)) / Math.PI) / 2) * 2 ** VT_ZOOM);
+};
+// Vector tiles covering a HUD cell (1, or 2-4 where it straddles a tile edge)
+function cellVtKeys(cellKey) {
+  const c = cellBox(cellKey), out = [];
+  for (const x of new Set([vtX(c.w), vtX(c.e)])) for (const y of new Set([vtY(c.s), vtY(c.n)])) out.push(`${x},${y}`);
+  return out;
+}
+const cellReady = (k) => cellVtKeys(k).every((z) => mapStore.vt.done.has(z));
+
+// Minimal protobuf reader for Mapbox Vector Tiles (only what is needed here)
+class Pbf {
+  constructor(b, start = 0, end = b.length) { this.b = b; this.pos = start; this.end = end; }
+  varint() {
+    let r = 0, mul = 1, byte;
+    do { byte = this.b[this.pos++]; r += (byte & 0x7f) * mul; mul *= 128; } while (byte & 0x80);
+    return r;
+  }
+  skip(wt) {
+    if (wt === 0) this.varint();
+    else if (wt === 1) this.pos += 8;
+    else if (wt === 2) this.pos += this.varint();
+    else if (wt === 5) this.pos += 4;
+    else throw new Error(`bad protobuf wire type ${wt}`);
+  }
+  sub() { const len = this.varint(), r = new Pbf(this.b, this.pos, this.pos + len); this.pos += len; return r; }
+  string() { const p = this.sub(); return new TextDecoder().decode(this.b.subarray(p.pos, p.end)); }
+  packed() { const p = this.sub(), out = []; while (p.pos < p.end) out.push(p.varint()); return out; }
+}
+
+const VT_LAYERS = new Set(["transportation", "building", "park", "landcover", "landuse", "water"]);
+function decodeVectorTile(buf) {
+  const top = new Pbf(new Uint8Array(buf)), layers = {};
+  while (top.pos < top.end) {
+    const tag = top.varint();
+    if (tag >> 3 !== 3 || (tag & 7) !== 2) { top.skip(tag & 7); continue; }
+    const L = top.sub(), feats = [], keys = [], vals = [];
+    let name = "", extent = 4096;
+    while (L.pos < L.end) {
+      const t = L.varint(), f = t >> 3;
+      if (f === 1) name = L.string();
+      else if (f === 2) feats.push(L.sub());
+      else if (f === 3) keys.push(L.string());
+      else if (f === 4) {
+        const V = L.sub();
+        let v = null;
+        while (V.pos < V.end) {
+          const vt = V.varint(), vf = vt >> 3;
+          if (vf === 1) v = V.string();
+          else if (vf === 4 || vf === 5) v = V.varint();
+          else if (vf === 6) { const z = V.varint(); v = z % 2 ? -(z + 1) / 2 : z / 2; }
+          else if (vf === 7) v = !!V.varint();
+          else V.skip(vt & 7);
+        }
+        vals.push(v);
+      } else if (f === 5) extent = L.varint();
+      else L.skip(t & 7);
+    }
+    if (!VT_LAYERS.has(name)) continue;
+    layers[name] = {
+      extent,
+      features: feats.map((F) => {
+        let type = 0, tags = [], geom = [];
+        while (F.pos < F.end) {
+          const t = F.varint(), f = t >> 3;
+          if (f === 2) tags = F.packed();
+          else if (f === 3) type = F.varint();
+          else if (f === 4) geom = F.packed();
+          else F.skip(t & 7);
+        }
+        const props = {};
+        for (let i = 0; i + 1 < tags.length; i += 2) props[keys[tags[i]]] = vals[tags[i + 1]];
+        return { type, props, geom };
+      })
+    };
+  }
+  return layers;
+}
+
+// Geometry commands -> lines / rings of tile coordinates
+function vtParts(geom) {
+  const out = [];
+  let x = 0, y = 0, cur = null;
+  for (let i = 0; i < geom.length;) {
+    const cmd = geom[i] & 7, count = Math.floor(geom[i] / 8);
+    i++;
+    if (cmd === 7) continue; // ClosePath: rings are implicitly closed here
+    for (let k = 0; k < count; k++) {
+      const dx = geom[i++], dy = geom[i++];
+      x += dx % 2 ? -(dx + 1) / 2 : dx / 2;
+      y += dy % 2 ? -(dy + 1) / 2 : dy / 2;
+      if (cmd === 1) { cur = [[x, y]]; out.push(cur); } else if (cur) cur.push([x, y]);
+    }
+  }
+  return out;
+}
+
+const VT_ROAD_TIER = { motorway: 3, trunk: 3, primary: 2, secondary: 2, tertiary: 2, minor: 1 };
+function vtAreaKind(layer, p) {
+  if (layer === "building") return "blocks";
+  if (layer === "water") return p.class === "swimming_pool" ? null : "water";
+  if (layer === "park") return "parks";
+  if (layer === "landcover") return p.class === "grass" || p.class === "wood" ? "parks" : null;
+  if (layer === "landuse") return /^(cemetery|pitch|playground)$/.test(p.class || "") ? "parks" : null;
+  return null;
+}
+
+function addVectorTile(key, layers) {
+  const [tx, ty] = key.split(",").map(Number), n = 2 ** VT_ZOOM;
+  const added = { ways: [], areas: { blocks: [], parks: [], water: [] } }, ids = [];
+  for (const [lname, layer] of Object.entries(layers)) {
+    const ext = layer.extent;
+    const toLL = ([px, py]) => {
+      const X = (tx + px / ext) / n, Y = (ty + py / ext) / n;
+      return [(Math.atan(Math.sinh(Math.PI * (1 - 2 * Y))) * 180) / Math.PI, X * 360 - 180];
+    };
+    layer.features.forEach((f, i) => {
+      const base = `${key}/${lname}/${i}`;
+      if (lname === "transportation") {
+        const tier = VT_ROAD_TIER[f.props.class];
+        if (!tier || f.type !== 2) return;
+        vtParts(f.geom).forEach((line, j) => {
+          if (line.length < 2) return;
+          const ll = line.map(toLL), way = { tier, ll, bb: llBounds(ll) };
+          mapStore.ways.set(`${base}.${j}`, way);
+          ids.push(`${base}.${j}`);
+          added.ways.push(way);
+        });
+        return;
+      }
+      const kind = vtAreaKind(lname, f.props);
+      if (!kind || f.type !== 3) return;
+      let outerSign = 0;
+      vtParts(f.geom).forEach((ring, j) => {
+        if (ring.length < 3) return;
+        let a = 0;
+        for (let k = 0, m = ring.length - 1; k < ring.length; m = k++) a += ring[m][0] * ring[k][1] - ring[k][0] * ring[m][1];
+        if (!outerSign) outerSign = Math.sign(a);
+        if (Math.sign(a) !== outerSign) return; // hole (courtyard, island): not drawn separately
+        const ll = ring.map(toLL);
+        mapStore.areas.set(`${base}.${j}`, { kind, ll, bb: llBounds(ll) });
+        ids.push(`${base}.${j}`);
+        added.areas[kind].push(ll);
+      });
+    });
+  }
+  mapStore.vt.items.set(key, ids);
+  return added;
+}
+
+async function loadVectorTile(key) {
+  const V = mapStore.vt;
+  try {
+    const [x, y] = key.split(",");
+    const url = (await vtTemplate()).replace("{z}", VT_ZOOM).replace("{x}", x).replace("{y}", y);
+    const res = await fetchWithTimeout(url, {}, VT_TIMEOUT_MS);
+    if (res.status === 404) vtUrlTemplate = null; // data version moved on
+    if (!res.ok && res.status !== 204) throw new Error(`map tile HTTP ${res.status}`);
+    const added = addVectorTile(key, res.status === 204 ? {} : decodeVectorTile(await res.arrayBuffer()));
+    V.done.add(key);
+    V.queued.delete(key);
+    onStoreGrew(added);
+    mapStore.failStreak = 0;
+    const total = mapStore.corridor.length;
+    const ready = total ? mapStore.corridor.filter((c) => cellReady(c.key)).length : 0;
+    logMsg(`Map tile ${key}: ${added.ways.length} roads, ${Object.values(added.areas).reduce((s2, l) => s2 + l.length, 0)} areas` +
+           (total ? ` (route ${ready}/${total} cells ready offline)` : ""));
+  } catch (err) {
+    // e.g. no signal: retry later (the HUD keeps what it already has)
+    mapStore.failStreak++;
+    V.queued.delete(key);
+    V.retryAt.set(key, Date.now() + Math.min(60000, 5000 * mapStore.failStreak));
+    logMsg(`Map tile ${key} failed (retrying): ${errText(err)}`);
+  }
+}
+
+function pumpVectorTiles() {
+  const V = mapStore.vt;
+  while (V.inflight < VT_PARALLEL && V.queue.length) {
+    const key = V.queue.shift();
+    V.inflight++;
+    loadVectorTile(key).finally(() => {
+      V.inflight--;
+      updateMapStatus();
+      setTimeout(pumpVectorTiles, 50);
+    });
+  }
+  updateMapStatus();
+}
+
+// ---------- Speed limits (optional): Overpass ways with a maxspeed tag ----------
+async function pumpLimits() {
+  const L = mapStore.limits;
+  if (L.inflight || !L.queue.length) return;
+  const { rect, cells } = takeBatchRect(L);
+  L.inflight = true;
+  try {
+    const bb = `${rect.s.toFixed(5)},${rect.w.toFixed(5)},${rect.n.toFixed(5)},${rect.e.toFixed(5)}`;
+    const osm = await overpassQuery(`[out:json][timeout:25];way["highway"~"${HIGHWAY_RE}"]["maxspeed"](${bb});out geom qt;`, 45000);
+    let added = 0;
+    for (const el of osm.elements || []) {
+      if (el.type !== "way" || !el.geometry || el.geometry.length < 2) continue;
+      const limit = parseMaxspeedMph(el.tags?.maxspeed), id = "w" + el.id;
+      if (!limit || mapStore.limitWays.has(id)) continue;
+      const ll = el.geometry.map((pt) => [pt.lat, pt.lon]);
+      mapStore.limitWays.set(id, { limit, ll, bb: llBounds(ll) });
+      added++;
+    }
+    for (const k of cells) { L.done.add(k); L.queued.delete(k); }
+    mapStore.projDirty = true;
+    logMsg(`Speed limits: +${added} roads.`);
+  } catch (err) {
+    const retry = Date.now() + 60000;
+    for (const k of cells) if (L.queued.delete(k)) L.retryAt.set(k, retry);
+    logMsg(`Speed limits unavailable for now: ${errText(err)}`);
+  } finally {
+    L.inflight = false;
+    if (L.queue.length) setTimeout(pumpLimits, 500);
+  }
+}
+
+function takeBatchRect(L) {
   const pos = (k) => k.split(",").map(Number);
-  const [fx, fy] = pos(mapStore.queue[0]);
+  const [fx, fy] = pos(L.queue[0]);
   let x0 = fx, x1 = fx, y0 = fy, y1 = fy;
   const keep = [];
-  for (const k of mapStore.queue) {
+  for (const k of L.queue) {
     const [x, y] = pos(k);
     const nx0 = Math.min(x0, x), nx1 = Math.max(x1, x), ny0 = Math.min(y0, y), ny1 = Math.max(y1, y);
-    if (nx1 - nx0 < MAX_RECT_CELLS && ny1 - ny0 < MAX_RECT_CELLS) { x0 = nx0; x1 = nx1; y0 = ny0; y1 = ny1; } else keep.push(k);
+    if (nx1 - nx0 < L.maxRect && ny1 - ny0 < L.maxRect) { x0 = nx0; x1 = nx1; y0 = ny0; y1 = ny1; } else keep.push(k);
   }
   const lo = cellBox(tileKey(x0, y0)), hi = cellBox(tileKey(x1, y1));
   const cells = [];
   for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) cells.push(tileKey(x, y));
-  mapStore.queue = keep;
+  L.queue = keep;
   return { rect: { s: lo.s, w: lo.w, n: hi.n, e: hi.e }, cells };
-}
-
-// Adds new OSM elements to the store (ways seen in an earlier batch are skipped)
-function addOsmToStore(osm) {
-  const added = { ways: [], areas: { blocks: [], parks: [], water: [] } };
-  const toLL = (p) => [p.lat, p.lon];
-  for (const el of osm.elements || []) {
-    const t = el.tags || {};
-    if (el.type === "way" && el.geometry && el.geometry.length >= 2) {
-      const id = "w" + el.id;
-      if (mapStore.ways.has(id) || mapStore.areas.has(id)) continue;
-      const ll = el.geometry.map(toLL);
-      if (t.highway) {
-        const way = { tier: highwayTier(t.highway), limit: parseMaxspeedMph(t.maxspeed), ll, bb: llBounds(ll) };
-        mapStore.ways.set(id, way);
-        added.ways.push(way);
-      } else if (ll.length > 2) {
-        const kind = t.building ? "blocks" : t.natural === "water" ? "water" : "parks";
-        mapStore.areas.set(id, { kind, ll, bb: llBounds(ll) });
-        added.areas[kind].push(ll);
-      }
-    } else if (el.type === "relation" && el.members) {
-      const id = "r" + el.id;
-      if (mapStore.areas.has(id + ".0")) continue;
-      const outer = el.members.filter((m) => m.role !== "inner" && m.geometry).map((m) => m.geometry.map(toLL));
-      assembleRings(outer).forEach((ring, i) => {
-        if (ring.length < 3) return;
-        mapStore.areas.set(`${id}.${i}`, { kind: "water", ll: ring, bb: llBounds(ring) });
-        added.areas.water.push(ring);
-      });
-    }
-  }
-  return added;
 }
 
 function mergeTileIndex(dst, src, touched) {
@@ -1605,48 +1937,50 @@ function onStoreGrew(added) {
   ble.lastTileKey = null; // re-check the live 3x3 tiles on the HUD
 }
 
-// Queues cells for download; urgent ones (around the player) jump the queue
-function requestCells(keys, urgent) {
-  const now = Date.now(), fresh = [];
+function enqueueKeys(Q, keys, urgent, now) {
+  const fresh = [];
   for (const k of keys) {
-    if (mapStore.cells.has(k) || (mapStore.retryAt.get(k) || 0) > now) continue;
-    if (mapStore.queued.has(k)) {
-      const at = mapStore.queue.indexOf(k);
+    if (Q.done.has(k) || (Q.retryAt.get(k) || 0) > now) continue;
+    if (Q.queued.has(k)) {
+      const at = Q.queue.indexOf(k);
       if (!urgent || at < 0) continue; // at < 0: already downloading
-      mapStore.queue.splice(at, 1);
+      Q.queue.splice(at, 1);
     }
-    mapStore.queued.add(k);
+    Q.queued.add(k);
     fresh.push(k);
   }
-  if (!fresh.length) return;
-  if (urgent) mapStore.queue.unshift(...fresh); else mapStore.queue.push(...fresh);
-  pumpMapQueue();
+  if (urgent) Q.queue.unshift(...fresh); else Q.queue.push(...fresh);
 }
 
-async function pumpMapQueue() {
-  if (mapStore.inflight || !mapStore.queue.length) return;
-  const { rect, cells } = takeBatchRect();
-  mapStore.inflight = true;
-  try {
-    const osm = await overpassQuery(rectQuery(rect));
-    const added = addOsmToStore(osm);
-    for (const k of cells) { mapStore.cells.add(k); mapStore.queued.delete(k); }
-    onStoreGrew(added);
-    const total = mapStore.corridor.length;
-    const ready = total ? mapStore.corridor.filter((c) => mapStore.cells.has(c.key)).length : 0;
-    logMsg(`Map: +${added.ways.length} roads, +${Object.values(added.areas).reduce((n, l) => n + l.length, 0)} areas` +
-           (total ? ` (route ${ready}/${total} tiles ready offline)` : ""));
-  } catch (err) {
-    const retry = Date.now() + 20000; // e.g. no signal: try again later (the HUD keeps what it has)
-    for (const k of cells) if (mapStore.queued.delete(k)) mapStore.retryAt.set(k, retry);
-    logMsg(`Map download failed (retrying in 20 s): ${errText(err)}`);
-  } finally {
-    mapStore.inflight = false;
-    if (mapStore.queue.length) setTimeout(pumpMapQueue, 250);
+// Queues HUD cells for download (their vector tiles, then speed limits); urgent ones (around
+// the player) jump the queue
+function requestCells(keys, urgent) {
+  const now = Date.now(), vtKeys = [], seen = new Set();
+  for (const k of keys) for (const z of cellVtKeys(k)) if (!seen.has(z)) { seen.add(z); vtKeys.push(z); }
+  enqueueKeys(mapStore.vt, vtKeys, urgent, now);
+  enqueueKeys(mapStore.limits, keys, urgent, now);
+  pumpVectorTiles();
+  pumpLimits();
+}
+
+// One short line in the sheet so it is obvious whether the map is there
+function updateMapStatus() {
+  const el = document.getElementById("mapStatus");
+  if (!el) return;
+  let text = "";
+  if (state.hasRealRoute && mapStore.corridor.length) {
+    const total = mapStore.corridor.length, ready = mapStore.corridor.filter((c) => cellReady(c.key)).length;
+    text = ready >= total ? "Map ready for the whole route" :
+           mapStore.failStreak >= 2 ? `Map: no connection, retrying (${Math.round(100 * ready / total)}% ready)` :
+           `Downloading route map… ${Math.round(100 * ready / total)}%`;
+  } else if (mapStore.failStreak >= 2 && !state.ways.length) {
+    text = "Map: no connection, retrying…";
+  } else if (mapStore.vt.inflight && !state.ways.length) {
+    text = "Downloading map…";
   }
+  if (el.textContent !== text) el.textContent = text;
 }
 
-// Route corridor: every cell within one cell of the route, tagged with its distance along it
 function setCorridor(coordsLonLat) {
   const seen = new Map();
   const addAround = (lat, lon, along) => {
@@ -1664,7 +1998,7 @@ function setCorridor(coordsLonLat) {
   mapStore.corridorSet = new Set(seen.keys());
   mapStore.sdQueue = [];
   mapStore.sdQueued.clear();
-  for (const c of mapStore.corridor) if (mapStore.cells.has(c.key)) queueSdTile(c.key);
+  for (const c of mapStore.corridor) if (cellReady(c.key)) queueSdTile(c.key);
   logMsg(`Preloading the route map: ${mapStore.corridor.length} tiles along ${(along / 1609.34).toFixed(1)} mi.`);
   requestCorridorWindow();
 }
@@ -1682,22 +2016,29 @@ function requestCorridorWindow() {
   requestCells(mapStore.corridor.filter((c) => c.along >= from && c.along <= to).map((c) => c.key), false);
 }
 
-// Keeps phone memory bounded on long drives: drops data that is far from the car and not on
-// the route ahead, then rebuilds the per-tile index from what is left
+// Keeps phone memory bounded on long drives: drops map tiles far from the car and not on the
+// route ahead, then rebuilds the per-tile index from what is left
 function evictIfNeeded(lat, lon) {
   if (mapStore.ways.size + mapStore.areas.size < STORE_MAX_ITEMS) return;
   const keep = new Set(neighbourCells(lat, lon, 4));
   const from = nav.progressM - 1500, to = nav.progressM + PRELOAD_AHEAD_M;
   for (const c of mapStore.corridor) if (c.along >= from && c.along <= to) keep.add(c.key);
+  const keepVt = new Set();
+  for (const k of keep) for (const z of cellVtKeys(k)) keepVt.add(z);
+  for (const [z, ids] of mapStore.vt.items) {
+    if (keepVt.has(z)) continue;
+    for (const id of ids) { mapStore.ways.delete(id); mapStore.areas.delete(id); }
+    mapStore.vt.items.delete(z);
+    mapStore.vt.done.delete(z);
+  }
   const touchesKept = (bb) => {
     for (let tx = tileXOf(bb[1]); tx <= tileXOf(bb[3]); tx++) {
       for (let ty = tileYOf(bb[0]); ty <= tileYOf(bb[2]); ty++) if (keep.has(tileKey(tx, ty))) return true;
     }
     return false;
   };
-  for (const [id, way] of mapStore.ways) if (!touchesKept(way.bb)) mapStore.ways.delete(id);
-  for (const [id, ar] of mapStore.areas) if (!touchesKept(ar.bb)) mapStore.areas.delete(id);
-  for (const k of [...mapStore.cells]) if (!keep.has(k)) mapStore.cells.delete(k);
+  for (const [id, lw] of mapStore.limitWays) if (!touchesKept(lw.bb)) mapStore.limitWays.delete(id);
+  for (const k of [...mapStore.limits.done]) if (!keep.has(k)) mapStore.limits.done.delete(k);
   const areas = { blocks: [], parks: [], water: [] };
   for (const ar of mapStore.areas.values()) areas[ar.kind].push(ar.ll);
   mapStore.tileRuns = indexWaysIntoTiles([...mapStore.ways.values()]);
@@ -1719,6 +2060,7 @@ function mapTick(lat, lon) {
     requestCells(neighbourCells(lat, lon, 2), true);
     requestCorridorWindow();
     evictIfNeeded(lat, lon);
+    updateMapStatus();
   }
   if (mapStore.projDirty || !mapStore.projCenter || distM(mapStore.projCenter, { lat, lon }) > 800) projectNearby(lat, lon);
 }
@@ -1943,8 +2285,8 @@ function updateSpeedLimitFromRoads() {
   lastLimitMs = Date.now();
   const px = state.playerX, py = state.playerY;
   let best = { d2: 30 * 30, limit: 0 }; // only roads within 30 m count
-  for (const w of state.ways) {
-    if (!w.limit) continue;
+  if (isDemo()) return;
+  for (const w of state.limitWays) {
     for (let i = 0; i < w.pts.length - 1; i++) {
       const a = w.pts[i], b = w.pts[i + 1];
       if (Math.min(a.x, b.x) - 30 > px || Math.max(a.x, b.x) + 30 < px ||
@@ -1990,7 +2332,7 @@ async function connectGatt() {
   logMsg(`Connected to ${ble.device.name || "GTA-HUD"} over WebBLE` +
          (ble.caps.sd ? " (memory card: route map will be stored on it)." : " (no memory card: map streams live)."));
   sendRouteOverBle();
-  for (const c of mapStore.corridor) if (mapStore.cells.has(c.key)) queueSdTile(c.key);
+  for (const c of mapStore.corridor) if (cellReady(c.key)) queueSdTile(c.key);
 }
 
 // HudStatusPacket: version, flags, max tile bytes, stored tiles, hud mode, brightness %
@@ -2262,6 +2604,111 @@ function parseTripInput(raw) {
   // Unexpanded short links (maps.app.goo.gl, maps.apple/p, ...) or unknown sites: use the text
   return textFallback();
 }
+// ---- Address matching for geocoder results (pure functions; tested by tools/test_trip_links.js)
+// A geocoder answer is only used when it is the address that was asked for: same house number,
+// same street (direction included: E and W Maple Rd are miles apart) and, if given, same ZIP.
+const STREET_SUFFIX = {
+  street: "st", st: "st", avenue: "ave", ave: "ave", av: "ave", road: "rd", rd: "rd", boulevard: "blvd",
+  blvd: "blvd", drive: "dr", dr: "dr", lane: "ln", ln: "ln", court: "ct", ct: "ct", place: "pl", pl: "pl",
+  parkway: "pkwy", pkwy: "pkwy", highway: "hwy", hwy: "hwy", terrace: "ter", ter: "ter", circle: "cir",
+  cir: "cir", way: "way", trail: "trl", trl: "trl", square: "sq", sq: "sq", expressway: "expy", freeway: "fwy"
+};
+const DIRECTION = {
+  north: "n", n: "n", south: "s", s: "s", east: "e", e: "e", west: "w", w: "w",
+  northeast: "ne", ne: "ne", northwest: "nw", nw: "nw", southeast: "se", se: "se", southwest: "sw", sw: "sw"
+};
+
+// "E. Jefferson Avenue" -> ["e", "jefferson", "ave"]
+function streetWords(s) {
+  return String(s || "").toLowerCase().replace(/[.,'’]/g, " ").split(/\s+/).filter(Boolean)
+    .map((w) => STREET_SUFFIX[w] || DIRECTION[w] || w);
+}
+
+function sameStreet(a, b) {
+  const wa = streetWords(a), wb = streetWords(b);
+  if (!wa.length || !wb.length) return false;
+  const dirs = new Set(Object.values(DIRECTION)), sfx = new Set(Object.values(STREET_SUFFIX));
+  const da = wa.filter((w) => dirs.has(w)).join(" "), db = wb.filter((w) => dirs.has(w)).join(" ");
+  if (da && db && da !== db) return false; // E vs W
+  const core = (ws) => { const c = ws.filter((w) => !dirs.has(w) && !sfx.has(w)); return (c.length ? c : ws).join(" "); };
+  return core(wa) === core(wb);
+}
+
+// "Name, 3540 E Jefferson Ave Ste 2, Detroit, MI 48207-1234, United States" ->
+//   { house: "3540", street: "E Jefferson Ave", city: "Detroit", state: "MI", zip: "48207", usa: true }
+// "Unter den Linden 77, 10117 Berlin, Germany" ->
+//   { house: "77", street: "Unter den Linden", city: "Berlin", zip: "10117", country: "Germany" }
+const UNIT_RE = /^(suite|ste|unit|apt|apartment|fl|floor|bldg|building|rm|room|#)\b/i;
+const COUNTRY_RE = /^(canada|mexico|m[eé]xico|germany|deutschland|france|united kingdom|uk|england|scotland|wales|ireland|spain|espa[nñ]a|italy|italia|netherlands|nederland|belgium|belgi[eë]|switzerland|schweiz|suisse|austria|[oö]sterreich|sweden|sverige|norway|norge|denmark|danmark|finland|suomi|poland|polska|portugal|czechia|czech republic|japan|china|india|australia|new zealand|brazil|brasil)$/i;
+function parseAddressParts(text) {
+  const parts = String(text || "").split(/\s*[,\n]\s*/).map((x) => x.trim()).filter(Boolean);
+  const out = { house: "", street: "", city: "", state: "", zip: "", usa: false, country: "" };
+  const last = parts[parts.length - 1] || "";
+  if (/^(united states( of america)?|usa|u\.s\.a?\.?)$/i.test(last)) { parts.pop(); out.usa = true; }
+  else if (COUNTRY_RE.test(last)) { out.country = parts.pop(); }
+  const hasSuffixWord = (x) => x.toLowerCase().split(/\s+/).slice(1).some((w) => STREET_SUFFIX[w.replace(/\./g, "")] || DIRECTION[w.replace(/\./g, "")]);
+  const usStyle = (x) => /^\d+[a-z]?(-\d+)?\s+\S/i.test(x) && !UNIT_RE.test(x);
+  const euStyle = (x) => /^[^\d,]*[^\d\s,]\s+\d{1,4}[a-z]?$/i.test(x) && !UNIT_RE.test(x);
+  const postcodeCity = (x) => /^\d{4,5}\s+[^\d]/.test(x);
+  // US style ("3540 E Jefferson Ave") when it looks American, else European ("Hauptstr 5")
+  let si = parts.findIndex((x) => usStyle(x) && (out.usa || hasSuffixWord(x) || !postcodeCity(x)));
+  let eu = false;
+  if (si < 0 || (!out.usa && !hasSuffixWord(parts[si]) && parts.some(euStyle))) {
+    const ei = parts.findIndex(euStyle);
+    if (ei >= 0) { si = ei; eu = true; }
+  }
+  if (si < 0) return out;
+  if (eu) {
+    const m = parts[si].match(/^(.*\S)\s+(\d+[a-z]?)$/i);
+    out.street = m[1];
+    out.house = m[2].toLowerCase();
+  } else {
+    const m = parts[si].match(/^(\d+[a-z]?)(?:-\d+)?\s+(.*)$/i);
+    out.house = m[1].toLowerCase();
+    out.street = m[2]
+      .replace(/\s+\b(suite|ste|unit|apt|apartment|fl|floor|bldg|building|rm|room)\b\.?\s*#?\s*[\w-]+\s*$/i, "")
+      .replace(/\s*#\s*[\w-]+\s*$/, "").trim();
+  }
+  for (const x of parts.slice(si + 1)) {
+    if (UNIT_RE.test(x)) continue;
+    const csz = x.match(/^(.*?)\s*\b([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?$/);
+    if (csz) {
+      if (csz[1] && !out.city) out.city = csz[1];
+      out.state = csz[2].toUpperCase();
+      out.zip = csz[3];
+      out.usa = true;
+      continue;
+    }
+    const pc = x.match(/^(\d{4,5})\s+(.+)$/); // European "10117 Berlin"
+    if (pc && !out.usa) { out.zip = pc[1]; if (!out.city) out.city = pc[2]; continue; }
+    const z = x.match(/^(\d{5})(?:-\d{4})?$/);
+    if (z) { out.zip = z[1]; continue; }
+    if (/^[A-Za-z]{2}$/.test(x)) { out.state = x.toUpperCase(); continue; }
+    if (!out.city) out.city = x;
+  }
+  return out;
+}
+
+// want/got: { house, street, zip, city }
+function addressMatches(want, got) {
+  if (!got) return false;
+  if (want.house && String(got.house || "").toLowerCase().replace(/-.*/, "") !== want.house) return false;
+  if (want.street && !sameStreet(want.street, got.street)) return false;
+  if (want.zip && got.zip && String(got.zip).slice(0, 5) !== want.zip) return false;
+  if (!want.zip && want.city && got.city) {
+    const a = want.city.toLowerCase(), b = String(got.city).toLowerCase();
+    if (!a.includes(b) && !b.includes(a)) return false;
+  }
+  return true;
+}
+
+// Several verified matches more than 400 m apart = genuinely ambiguous: never guess between them
+function pickConsistent(cands) {
+  if (!cands.length) return null;
+  const a = cands[0];
+  const apart = cands.some((c) => Math.hypot((c.lat - a.lat) * 111132, (c.lon - a.lon) * 111320 * Math.cos(a.lat * Math.PI / 180)) > 400);
+  return apart ? { ambiguous: cands } : a;
+}
 // </trip-parser>
 
 async function resolveTripPlace(place) {
@@ -2269,7 +2716,7 @@ async function resolveTripPlace(place) {
     return { lat: place.lat, lon: place.lon, label: place.name || `${place.lat.toFixed(4)}, ${place.lon.toFixed(4)}` };
   }
   const r = await resolveLocationInput(place.query, false);
-  return { lat: r.lat, lon: r.lon, label: place.name || r.label };
+  return { lat: r.lat, lon: r.lon, label: place.name || r.label, matched: r.matched || "" };
 }
 
 function distM(a, b) {
@@ -2330,6 +2777,10 @@ async function startTrip(parsed) {
       src = await resolveLocationInput(fromText, true);
     }
     const dest = await resolveTripPlace(parsed.dest);
+    const farM = distM(src, dest);
+    if (farM > 160934 && !window.confirm(`${dest.matched || dest.label} is ${Math.round(farM / 1609.34)} miles away. Start the trip anyway?`)) {
+      throw new Error("trip cancelled (destination far away). Check the address.");
+    }
     const via = [];
     for (const v of parsed.via || []) via.push({ ...(await resolveTripPlace(v)), passed: false });
     activeTrip = { dest, via, startedAt: Date.now(), arrived: false };
@@ -2496,7 +2947,7 @@ async function planRoute(src, via, dest, opts = {}) {
 
   setNavRoute(simp.pts, maneuvers, route.duration);
   state.hasRealRoute = true;
-  if (!keepOrigin && !mapStore.cells.has(cellKeyAt(src.lat, src.lon))) state.speedLimitMph = 0; // unknown until a road with a maxspeed tag is under the player
+  if (!keepOrigin && !cellReady(cellKeyAt(src.lat, src.lon))) state.speedLimitMph = 0; // unknown until a road with a maxspeed tag is under the player
   nav.progressM = 0;
   state.gpsOrigin = true;
   autoDrive = simulating;
@@ -2761,6 +3212,9 @@ function updateSheet() {
     title.textContent = "Where to?";
     cta.textContent = "Start";
   }
+  const matched = activeTrip && activeTrip.dest.matched;
+  document.getElementById("destMatch").textContent =
+    matched && matched.toLowerCase() !== activeTrip.dest.label.toLowerCase() ? `Address: ${matched}` : "";
   cta.classList.toggle("dark", navigating || arrived);
   document.querySelector(".sheet").classList.toggle("is-trip", navigating || arrived);
   document.querySelector(".app").classList.toggle("nav-mode", navigating || arrived);
