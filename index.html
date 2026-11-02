@@ -1794,8 +1794,10 @@ function addVectorTile(key, layers) {
     layer.features.forEach((f, i) => {
       const base = `${key}/${lname}/${i}`;
       if (lname === "transportation") {
-        const tier = VT_ROAD_TIER[f.props.class];
-        if (!tier || f.type !== 2) return;
+        // Ramps (on/off slip roads) draw like arterials: full freeway width turns interchanges
+        // into white blobs at HUD zoom
+        const tier = Math.min(VT_ROAD_TIER[f.props.class] || 0, f.props.ramp ? 2 : 3);
+        if (!tier || f.type !== 2 || f.props.brunnel === "tunnel") return; // underground: not on a GTA radar
         vtParts(f.geom).forEach((line, j) => {
           if (line.length < 2) return;
           const ll = line.map(toLL), way = { tier, ll, bb: llBounds(ll) };
